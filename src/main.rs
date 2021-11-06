@@ -11,7 +11,11 @@ mod db;
 mod storage;
 mod watcher;
 
+mod request;
+
 mod router;
+
+mod string;
 
 type JoinHandleList = Vec<tokio::task::JoinHandle<error::Result<()>>>;
 

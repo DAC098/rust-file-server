@@ -21,6 +21,7 @@ axum = { version = "0.2.8" }
 hyper = { version = "0.14.13", features = ["full"] }
 tokio = { version = "1.12.0", features = ["full"] }
 tower = { version = "0.4.9"}
+mime = { version = "0.3" }
 
 tokio-postgres = { version = "0.7" }
 bb8 = { version = "0.7" }
