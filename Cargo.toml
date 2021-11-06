@@ -1,0 +1,29 @@
+[package]
+name = "image-server"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+shape-rs = { git = "https://github.com/dac098/shape-rs" }
+
+futures = { version = "0.3" }
+regex = { version = "1.5" }
+lazy_static = { version = "1.4" }
+num_cpus = { version = "1.0" }
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+serde_yaml = { version = "0.8" }
+
+axum = { version = "0.2.8" }
+hyper = { version = "0.14.13", features = ["full"] }
+tokio = { version = "1.12.0", features = ["full"] }
+tower = { version = "0.4.9"}
+
+tokio-postgres = { version = "0.7" }
+bb8 = { version = "0.7" }
+bb8-postgres = { version = "0.7" }
+
+notify = { version = "5.0.0-pre.13", features = ["serde"]}
