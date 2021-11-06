@@ -8,6 +8,7 @@ mod error;
 
 mod config;
 mod db;
+mod storage;
 mod watcher;
 
 mod router;
@@ -63,10 +64,11 @@ fn main_entry() -> error::Result<i32> {
 
 async fn main_runtime(conf: config::ServerConfig) -> error::Result<i32> {
     let db_conf = conf.db;
-    let router = router::MakeRouter {
-        db: db::build_shared_state(db::build_config(db_conf)).await?
-    };
     let watch_directory = conf.directory.clone();
+    let router = router::MakeRouter {
+        db: db::build_shared_state(db::build_config(db_conf)).await?,
+        storage: storage::build_shared_state(conf.directory)
+    };
     let mut futures_list = JoinHandleList::new();
     futures_list.push(tokio::spawn(
         make_watcher(watch_directory)

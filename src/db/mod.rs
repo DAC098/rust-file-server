@@ -1,11 +1,11 @@
-use std::sync::{Arc};
-
-use tokio_postgres::{Config, NoTls, Error};
+use tokio_postgres::{Config};
 
 use crate::config::{DBConfig};
 
 pub mod types;
 pub mod shared_state;
+
+pub use shared_state::build_shared_state;
 
 pub fn build_config(conf: DBConfig) -> Config {
     let mut rtn = Config::new();
@@ -15,14 +15,4 @@ pub fn build_config(conf: DBConfig) -> Config {
     rtn.port(conf.port);
     rtn.dbname(conf.database.as_ref());
     rtn
-}
-
-pub async fn build_shared_state(
-    db_conf: Config
-) -> std::result::Result<shared_state::ArcDBState, Error> {
-    Ok(Arc::new(shared_state::DBState {
-        pool: types::Pool::builder().build(
-            types::ConnectionManager::new(db_conf, NoTls)
-        ).await?
-    }))
 }

@@ -8,6 +8,7 @@ use hyper::service::{Service};
 use regex::{Regex};
 
 use crate::db::shared_state::{ArcDBState};
+use crate::storage::shared_state::{ArcStorageState};
 
 mod handle;
 
@@ -24,7 +25,8 @@ fn make_plain_text_response(msg: &'static str) -> Response<Body> {
 }
 
 pub struct Router {
-    db: ArcDBState
+    db: ArcDBState,
+    storage: ArcStorageState
 }
 
 impl Service<Request<Body>> for Router {
@@ -39,6 +41,7 @@ impl Service<Request<Body>> for Router {
     fn call(&mut self, mut req: Request<Body>) -> Self::Future {
         let extensions_ref = req.extensions_mut();
         extensions_ref.insert(self.db.clone());
+        extensions_ref.insert(self.storage.clone());
 
         Box::pin(async move {
             let url = req.uri();
@@ -52,16 +55,10 @@ impl Service<Request<Body>> for Router {
     }
 }
 
+#[derive(Clone)]
 pub struct MakeRouter {
-    pub db: ArcDBState
-}
-
-impl Clone for MakeRouter {
-    fn clone(&self) -> Self {
-        MakeRouter {
-            db: self.db.clone()
-        }
-    }
+    pub db: ArcDBState,
+    pub storage: ArcStorageState
 }
 
 // okay so for a reason that I still do not understand, this will only work if the Service
@@ -126,15 +123,12 @@ impl<T> Service<T> for MakeRouter {
 
     fn call(&mut self, _: T) -> Self::Future {
         let router = Router {
-            db: self.db.clone()
+            db: self.db.clone(),
+            storage: self.storage.clone()
         };
 
         Box::pin(async move {
             Ok(router)
         })
     }
-}
-
-pub fn make_router(db: ArcDBState) -> MakeRouter {
-    MakeRouter { db }
 }
