@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>File Server</title>
+        <link rel="icon" href="data:;base64,iVBORw0KGgo=">
+    </head>
+    <body>
+        <div><a href="{{prev_path}}">back</a> | path: {{display_path}} | <a href="{{current_path}}?download=1" download>Download</a></div>
+        <div>name: {{item.name}}</div>
+        <div>size: {{item.size}} ({{bytes-to-unit item.size}})</div>
+        <div>created: <span title="{{item.created}}">{{format-ts-sec item.created}}</span></div>
+        <div>modified: <span title="{{item.modified}}"></span>{{format-ts-sec item.modified}}</div>
+    </body>
+</html>

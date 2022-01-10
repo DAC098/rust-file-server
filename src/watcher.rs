@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use notify::{
     Watcher, 
@@ -9,10 +9,8 @@ use notify::{
     event,
     // ErrorKind,
 };
-use tokio::runtime::{Handle};
-use tokio::sync::mpsc::{
-    self
-};
+use tokio::runtime::Handle;
+use tokio::sync::mpsc;
 
 use crate::error;
 

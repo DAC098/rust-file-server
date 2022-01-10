@@ -1,11 +1,16 @@
 use std::{fmt, error};
-use std::convert::{From};
+use std::convert::From;
+
+use lib::snowflake::Error as SnowflakeError;
 
 use crate::config::error as config_error;
 
 #[derive(Debug)]
 pub enum Error {
+    Error(String),
+
     ConfigError(config_error::Error),
+    SnowflakeError(SnowflakeError),
     IOError(std::io::Error),
 
     HyperError(hyper::Error),
@@ -18,12 +23,14 @@ pub type Result<T> = std::result::Result<T, Error>;
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Error::Error(msg) => write!(f, "{}", msg),
             Error::ConfigError(err) => write!(f, "{}", err),
+            Error::SnowflakeError(err) => write!(f, "{}", err),
             Error::IOError(err) => write!(f, "{:?}", err),
             Error::HyperError(err) => write!(f, "{:?}", err),
             Error::NotifyError(err) => write!(f, "{:?}", err),
             Error::PostgresError(err) => write!(f, "{:?}", err),
-            _ => write!(f, "application error")
+            // _ => write!(f, "application error")
         }
     }
 }
@@ -31,7 +38,8 @@ impl fmt::Display for Error {
 impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
-            Error::ConfigError(err) => err.source(),
+            Error::ConfigError(err) => Some(err),
+            Error::SnowflakeError(err) => Some(err),
             Error::IOError(err) => Some(err),
             Error::HyperError(err) => Some(err),
             Error::NotifyError(err) => Some(err),
@@ -50,6 +58,12 @@ impl From<std::io::Error> for Error {
 impl From<config_error::Error> for Error {
     fn from(error: config_error::Error) -> Error {
         Error::ConfigError(error)
+    }
+}
+
+impl From<SnowflakeError> for Error {
+    fn from(error: SnowflakeError) -> Error {
+        Error::SnowflakeError(error)
     }
 }
 

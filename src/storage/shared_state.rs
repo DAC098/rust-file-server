@@ -1,34 +1,47 @@
-use std::sync::{Arc};
-use std::path::{PathBuf, Path};
+use std::sync::Arc;
+use std::path::PathBuf;
+
+use crate::config::StorageConfig;
 
 pub struct StorageState {
-    directory: PathBuf
+    pub directory: PathBuf,
+    pub temporary: PathBuf,
+    pub web_static: Option<PathBuf>,
 }
 
 pub type ArcStorageState = Arc<StorageState>;
 
 impl StorageState {
 
-    pub fn get_dir(&self) -> PathBuf {
-        self.directory.clone()
-    }
-    
-    pub fn get_dir_ref(&self) -> &PathBuf {
-        &self.directory
-    }
+    pub fn get_tmp_file(&self, ext: &str) -> Option<PathBuf> {
+        let mut count: u64 = 0;
+        let mut tmp_file = self.temporary.clone();
+        let now = chrono::Utc::now().timestamp().to_string();
 
-    pub fn get_dir_with<P>(&self, path: P) -> PathBuf
-    where
-        P: AsRef<Path> 
-    {
-        let mut rtn = self.directory.clone();
-        rtn.push(path);
-        rtn
+        loop {
+            let file_name = format!("{}_{}", now, count);
+            tmp_file.set_file_name(file_name);
+            tmp_file.set_extension(ext);
+
+            if !tmp_file.exists() {
+                return Some(tmp_file)
+            } else {
+                if count == u64::MAX {
+                    return None;
+                } else {
+                    count += 1;
+                }
+            }
+        }
     }
 }
 
-pub fn build_shared_state(directory: PathBuf) -> ArcStorageState {
-    Arc::new(StorageState {
-        directory
-    })
+impl From<StorageConfig> for ArcStorageState {
+    fn from(storage: StorageConfig) -> ArcStorageState {
+        Arc::new(StorageState {
+            directory: storage.directory,
+            temporary: storage.temporary,
+            web_static: storage.web_static
+        })
+    }
 }

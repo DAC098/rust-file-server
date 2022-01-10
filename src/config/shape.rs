@@ -107,8 +107,34 @@ pub struct BindInterfaceShape {
 }
 
 #[derive(Deserialize)]
-pub struct ServerShape {
+pub struct StorageShape {
     pub directory: Option<PathBuf>,
+    pub temporary: Option<PathBuf>,
+    pub web_static: Option<PathBuf>,
+}
+
+impl MapShape for StorageShape {
+    fn map_shape(&mut self, rhs: Self) {
+        self.directory.map_shape(rhs.directory);
+        self.temporary.map_shape(rhs.temporary);
+        self.web_static.map_shape(rhs.web_static);
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SecurityShape {
+    pub secret: Option<String>,
+}
+
+impl MapShape for SecurityShape {
+    fn map_shape(&mut self, rhs: Self) {
+        self.secret.map_shape(rhs.secret);
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ServerShape {
+    pub storage: Option<StorageShape>,
     pub bind: Option<Vec<BindInterfaceShape>>,
     pub port: Option<u16>,
 
@@ -123,11 +149,11 @@ pub struct ServerShape {
     pub ssl: Option<SslShape>,
     pub template: Option<TemplateShape>,
     pub watcher: Option<WatcherShape>,
+    pub security: Option<SecurityShape>,
 }
 
 impl MapShape for ServerShape {
     fn map_shape(&mut self, rhs: Self) {
-        self.directory.map_shape(rhs.directory);
         self.bind.map_shape(rhs.bind);
         self.port.map_shape(rhs.port);
         self.threads.map_shape(rhs.threads);
@@ -135,19 +161,21 @@ impl MapShape for ServerShape {
         self.max_connections.map_shape(rhs.max_connections);
         self.max_connection_rate.map_shape(rhs.max_connection_rate);
 
+        assign_map_struct(&mut self.storage, rhs.storage);
         assign_map_struct(&mut self.db, rhs.db);
         assign_map_struct(&mut self.email, rhs.email);
         assign_map_struct(&mut self.info, rhs.info);
         assign_map_struct(&mut self.ssl, rhs.ssl);
         assign_map_struct(&mut self.template, rhs.template);
         assign_map_struct(&mut self.watcher, rhs.watcher);
+        assign_map_struct(&mut self.security, rhs.security);
     }
 }
 
 impl Default for ServerShape {
     fn default() -> ServerShape {
         ServerShape {
-            directory: None,
+            storage: None,
             bind: None,
             port: None,
             threads: None,
@@ -160,7 +188,8 @@ impl Default for ServerShape {
             info: None,
             ssl: None,
             template: None,
-            watcher: None
+            watcher: None,
+            security: None
         }
     }
 }

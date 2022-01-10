@@ -1,11 +1,11 @@
-use tokio_postgres::{Config};
-
-use crate::config::{DBConfig};
+use tokio_postgres::Config;
+use crate::config::DBConfig;
 
 pub mod types;
-pub mod shared_state;
+mod shared_state;
+pub mod record;
 
-pub use shared_state::build_shared_state;
+pub use shared_state::*;
 
 pub fn build_config(conf: DBConfig) -> Config {
     let mut rtn = Config::new();

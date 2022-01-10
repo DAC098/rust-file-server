@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>File Server</title>
+        <link rel="icon" href="data:;base64,iVBORw0KGgo=">
+    </head>
+    <body>
+        <div>
+            <a href="{{prev_path}}">back</a> | path: {{display_path}}</div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="text-align:left;">Name</th>
+                    <th colspan="2">Size</th>
+                    <th>Created (UTC)</th>
+                    <th>Modified (UTC)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{#each items}}
+                <tr>
+                    <td><a href="{{join-to-path @root.current_path name}}">{{name}}</a></td>
+                    <td style="text-align: right;">{{size}}</td>
+                    <td>
+                        {{#if size}}
+                        ({{bytes-to-unit size}})
+                        {{/if}}
+                    </td>
+                    <td>
+                        <span title="{{created}}">{{format-ts-sec created}}</span>
+                    </td>
+                    <td>
+                        <span title="{{modified}}">{{format-ts-sec modified}}</span>
+                    </td>
+                </tr>
+                {{/each}}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="5">tota: {{value-length items}}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </body>
+</html>

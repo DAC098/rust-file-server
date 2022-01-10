@@ -1,21 +1,24 @@
 
-use std::path::{PathBuf};
+use std::path::PathBuf;
 
-use hyper::{Server};
-use futures::future::{try_join_all};
+use hyper::Server;
+use futures::future::try_join_all;
 
 mod error;
 
 mod config;
 mod db;
 mod storage;
+mod template;
 mod watcher;
+mod snowflakes;
+mod security;
 
-mod request;
+mod http;
 
-mod router;
+mod components;
 
-mod string;
+mod routing;
 
 type JoinHandleList = Vec<tokio::task::JoinHandle<error::Result<()>>>;
 
@@ -44,41 +47,34 @@ fn main_entry() -> error::Result<i32> {
         );
     }
 
-    let conf = config::load_server_config(config_files)?;
-    
+    let conf = config::validate_server_config(
+        config::load_server_config(config_files)?
+    )?;
+
     tokio::runtime::Builder::new_multi_thread()
         .enable_io()
         .enable_time()
         .worker_threads(conf.threads)
-        // .on_thread_park(|| {
-        //     println!("thread parked");
-        // })
-        // .on_thread_start(|| {
-        //     println!("thread started");
-        // })
-        // .on_thread_stop(|| {
-        //     println!("thread stopped");
-        // })
-        // .on_thread_unpark(|| {
-        //     println!("thread unparked");
-        // })
         .build()?
         .block_on(main_runtime(conf))
 }
 
 async fn main_runtime(conf: config::ServerConfig) -> error::Result<i32> {
     let db_conf = conf.db;
-    let watch_directory = conf.directory.clone();
-    let router = router::MakeRouter {
-        db: db::build_shared_state(db::build_config(db_conf)).await?,
-        storage: storage::build_shared_state(conf.directory)
+    let storage_conf = conf.storage;
+    let template_conf = conf.template;
+    let watch_directory = storage_conf.directory.clone();
+    let router = routing::MakeRouter {
+        db: db::DBState::new(db::build_config(db_conf)).await?,
+        storage: storage_conf.into(),
+        template: template::TemplateState::new(template::build_registry(template_conf)?),
+        snowflakes: snowflakes::IdSnowflakes::new(1)?
     };
+
     let mut futures_list = JoinHandleList::new();
     futures_list.push(tokio::spawn(
         make_watcher(watch_directory)
     ));
-
-    println!("building servers");
 
     for bind in conf.bind {
         let addr = bind.to_sockaddr();
@@ -92,8 +88,6 @@ async fn main_runtime(conf: config::ServerConfig) -> error::Result<i32> {
         }
     }
 
-    println!("blocking on join handles");
-
     try_join_all(futures_list).await.unwrap();
 
     Ok(0)
@@ -101,19 +95,23 @@ async fn main_runtime(conf: config::ServerConfig) -> error::Result<i32> {
 
 async fn make_server(
     addr: std::net::SocketAddr, 
-    router: router::MakeRouter,
+    router: routing::MakeRouter<'static>,
 ) -> error::Result<()> {
-    println!("building service stack");
     let svc = tower::ServiceBuilder::new()
         .service(router);
 
-    println!("creating server. binding to: {}", addr);
+    match Server::try_bind(&addr) {
+        Ok(builder) => {
+            println!("server listening on {}", addr);
 
-    if let Err(e) = Server::bind(&addr).serve(svc).await {
-        println!("server error. {:?}", e);
+            if let Err(e) = builder.serve(svc).await {
+                println!("server error. {:?}", e);
+            }
+        },
+        Err(err) => {
+            println!("failed to bind to address. {:?}", err);
+        }
     }
-
-    println!("server closed");
 
     Ok(())
 }
@@ -127,91 +125,3 @@ async fn make_watcher(directory: PathBuf) -> error::Result<()> {
 
     Ok(())
 }
-
-
-
-
-
-
-
-
-
-
-/*
-use hyper::service::Service;
-use hyper::{Body, Request, Response, Server};
-
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-
-type Counter = i32;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let addr = ([127, 0, 0, 1], 3000).into();
-
-    let server = Server::bind(&addr).serve(MakeSvc { counter: 81818 });
-    println!("Listening on http://{}", addr);
-
-    server.await?;
-    Ok(())
-}
-
-struct Svc {
-    counter: Counter,
-}
-
-impl Service<Request<Body>> for Svc {
-    type Response = Response<Body>;
-    type Error = hyper::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, req: Request<Body>) -> Self::Future {
-        fn mk_response(s: String) -> Result<Response<Body>, hyper::Error> {
-            Ok(Response::builder().body(Body::from(s)).unwrap())
-        }
-
-        let res = match req.uri().path() {
-            "/" => mk_response(format!("home! counter = {:?}", self.counter)),
-            "/posts" => mk_response(format!("posts, of course! counter = {:?}", self.counter)),
-            "/authors" => mk_response(format!(
-                "authors extraordinare! counter = {:?}",
-                self.counter
-            )),
-            // Return the 404 Not Found for other routes, and don't increment counter.
-            _ => return Box::pin(async { mk_response("oh no! not found".into()) }),
-        };
-
-        if req.uri().path() != "/favicon.ico" {
-            self.counter += 1;
-        }
-
-        Box::pin(async { res })
-    }
-}
-
-struct MakeSvc {
-    counter: Counter,
-}
-
-impl<T> Service<T> for MakeSvc {
-    type Response = Svc;
-    type Error = hyper::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, _: T) -> Self::Future {
-        let counter = self.counter.clone();
-        let fut = async move { Ok(Svc { counter }) };
-        Box::pin(fut)
-    }
-}
-*/
