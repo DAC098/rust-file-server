@@ -18,7 +18,13 @@ pub async fn handle_req(req: Request) -> Result<Response> {
             })
         }
 
-        let req_path = head.uri.path().strip_prefix("/").unwrap_or("");
+        let req_path = {
+            if head.uri.path().starts_with("/static/") {
+                head.uri.path().strip_prefix("/static/").unwrap()
+            } else {
+                head.uri.path().strip_prefix("/").unwrap_or("")
+            }
+        };
         let mut file_path = web_static.clone();
         file_path.push(&req_path);
 

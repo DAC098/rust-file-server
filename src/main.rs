@@ -25,7 +25,11 @@ type JoinHandleList = Vec<tokio::task::JoinHandle<error::Result<()>>>;
 fn main() {
     std::process::exit(match main_entry() {
         Ok(code) => code,
-        Err(_err) => 1
+        Err(err) => {
+            println!("{}", err);
+
+            1
+        }
     })
 }
 
@@ -80,7 +84,7 @@ async fn main_runtime(conf: config::ServerConfig) -> error::Result<i32> {
         let addr = bind.to_sockaddr();
 
         if addr.is_err() {
-            print!("{}", addr.unwrap_err());
+            println!("{}", addr.unwrap_err());
         } else {
             futures_list.push(tokio::spawn(
                 make_server(addr.unwrap(), router.clone())

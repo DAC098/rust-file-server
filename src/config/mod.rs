@@ -101,6 +101,7 @@ impl From<Option<shape::ServerInfoShape>> for ServerInfoConfig {
 pub struct TemplateConfig {
     pub directory: PathBuf,
     pub dev_mode: bool,
+    pub index_path: Option<PathBuf>
 }
 
 impl From<Option<shape::TemplateShape>> for TemplateConfig {
@@ -110,12 +111,14 @@ impl From<Option<shape::TemplateShape>> for TemplateConfig {
         if let Some(v) = value {
             TemplateConfig {
                 directory: v.directory.unwrap_or(default_dir),
-                dev_mode: v.dev_mode.unwrap_or(false)
+                dev_mode: v.dev_mode.unwrap_or(false),
+                index_path: v.index_path
             }
         } else {
             TemplateConfig {
                 directory: default_dir,
-                dev_mode: false
+                dev_mode: false,
+                index_path: None
             }
         }
     }

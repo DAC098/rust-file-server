@@ -12,9 +12,8 @@ use crate::{
         cookie::{SetCookie, SameSite}, 
         response::build
     }, 
-    db::ArcDBState, 
-    components::auth::require_user, 
-    security::argon::hash_with_default
+    db::ArcDBState,
+    security::argon::hash_with_default, components::auth::RetrieveSession
 };
 
 #[derive(Deserialize)]
@@ -28,7 +27,7 @@ pub async fn handle_post(req: Request) -> Result<Response> {
     let db = head.extensions.get::<ArcDBState>().unwrap();
     let mut conn = db.pool.get().await?;
 
-    let user = require_user(&head.headers, &*conn).await?;
+    let user = RetrieveSession::get(&head.headers, &*conn).await?.try_into_user()?;
     let hash: String = {
         let res = conn.query_one(
             "select hash from users where id = $1",

@@ -1,3 +1,4 @@
+use hyper::Body;
 use hyper::{Response as HyperResponse, http::response::Builder};
 use serde::Serialize;
 
@@ -57,4 +58,12 @@ pub fn okay_response(req: Request) -> error::Result<Response> {
     }
 
     okay_text_response()
+}
+
+pub fn redirect_response(new_path: &str) -> error::Result<Response> {
+    Ok(HyperResponse::builder()
+        .status(302)
+        .header("location", new_path)
+        .body(Body::empty())
+        .unwrap())
 }

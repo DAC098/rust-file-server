@@ -64,13 +64,15 @@ impl MapShape for ServerInfoShape {
 #[derive(Deserialize)]
 pub struct TemplateShape {
     pub directory: Option<PathBuf>,
-    pub dev_mode: Option<bool>
+    pub dev_mode: Option<bool>,
+    pub index_path: Option<PathBuf>,
 }
 
 impl MapShape for TemplateShape {
     fn map_shape(&mut self, rhs: Self) {
         self.directory.map_shape(rhs.directory);
         self.dev_mode.map_shape(rhs.dev_mode);
+        self.index_path.map_shape(rhs.index_path);
     }
 }
 

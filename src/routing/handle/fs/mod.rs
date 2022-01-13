@@ -11,7 +11,8 @@ use tokio::io::AsyncWriteExt;
 use tokio_util::codec::{FramedRead, BytesCodec};
 use hyper::{Body, Uri};
 
-use crate::components::auth::require_user;
+use crate::components::auth::{login_redirect, RetrieveSession};
+use crate::components::html::{check_if_html_headers, response_index_html_parts};
 use crate::db::record::{FsItem, FsItemType, User};
 use crate::db::ArcDBState;
 use crate::db::types::PoolConn;
@@ -74,7 +75,16 @@ pub async fn handle_get(req: Request) -> Result<Response> {
 
     let db = head.extensions.remove::<ArcDBState>().unwrap();
     let conn = db.pool.get().await?;
-    let user = components::auth::require_user(&head.headers, &*conn).await?;
+    let session = components::auth::RetrieveSession::get(&head.headers, &*conn).await?;
+
+    if check_if_html_headers(&head.headers)? {
+        return match session {
+            RetrieveSession::Success(_) => response_index_html_parts(head),
+            _ => login_redirect(&head.uri)
+        }
+    }
+
+    let user = session.try_into_user()?;
 
     if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, stripped_root).await? {
         let query_map = uri::QueryMap::new(&head.uri);
@@ -210,7 +220,7 @@ pub async fn handle_post(req: Request) -> Result<Response> {
 
     let db = head.extensions.remove::<ArcDBState>().unwrap();
     let mut conn = db.pool.get().await?;
-    let user = require_user(&head.headers, &*conn).await?;
+    let user = RetrieveSession::get(&head.headers, &*conn).await?.try_into_user()?;
 
     if directory.is_empty() {
         directory = user.id.to_string();
@@ -387,7 +397,7 @@ pub async fn handle_delete(req: Request) -> Result<Response> {
     let db = head.extensions.remove::<ArcDBState>().unwrap();
     let mut conn = db.pool.get().await?;
 
-    let user = require_user(&head.headers, &*conn).await?;
+    let user = RetrieveSession::get(&head.headers, &*conn).await?.try_into_user()?;
     
     if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &fs_path).await? {
         if fs_item.is_root {
@@ -616,7 +626,7 @@ pub async fn handle_put(req: Request) -> Result<Response> {
     let storage = head.extensions.remove::<ArcStorageState>().unwrap();
     let db = head.extensions.remove::<ArcDBState>().unwrap();
     let conn = db.pool.get().await?;
-    let user = require_user(&head.headers, &*conn).await?;
+    let user = RetrieveSession::get(&head.headers, &*conn).await?.try_into_user()?;
 
     if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &fs_path).await? {
         let query_map = uri::QueryMap::new(&head.uri);

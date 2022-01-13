@@ -9,11 +9,11 @@ use crate::{
         error::Result,
         error::Error,
         Response, 
-        response::build, 
+        response::{build, redirect_response}, 
         cookie::{get_cookie_map, SetCookie, SameSite}, 
         body::json_from_body
     }, 
-    db::{ArcDBState, record::UserSession}
+    db::{ArcDBState, record::UserSession}, components::{auth::RetrieveSession, html::response_index_html_parts}
 };
 
 #[derive(Deserialize)]
@@ -72,6 +72,17 @@ async fn create_session(conn: &impl GenericClient, body: Body,) -> Result<Respon
             msg: "requested username was not found".into(),
             source: None
         })
+    }
+}
+
+pub async fn handle_get(req: Request) -> Result<Response> {
+    let (mut head, _) = req.into_parts();
+    let db = head.extensions.remove::<ArcDBState>().unwrap();
+    let conn = db.pool.get().await?;
+
+    match RetrieveSession::get(&head.headers, &*conn).await? {
+        RetrieveSession::Success(_) => redirect_response("/fs/"),
+        _ => response_index_html_parts(head)
     }
 }
 

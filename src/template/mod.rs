@@ -1,6 +1,6 @@
 use std::fmt::Write;
 use std::path::PathBuf;
-use std::fs::read_dir;
+use std::fs::{read_dir, canonicalize};
 
 use handlebars::{Handlebars, TemplateError};
 
@@ -51,8 +51,7 @@ fn recursive_load_directory<'a>(
 
 pub fn build_registry<'a>(config: TemplateConfig) -> error::Result<Handlebars<'a>> {
     let required_templates = [
-        "page/directory",
-        "page/file"
+        "page/index"
     ];
 
     let mut hb = Handlebars::new();
@@ -64,6 +63,22 @@ pub fn build_registry<'a>(config: TemplateConfig) -> error::Result<Handlebars<'a
 
     let mut template_errors: Vec<TemplateError> = Vec::new();
     recursive_load_directory(&config, &mut hb, &config.directory, &mut template_errors)?;
+
+    if let Some(mut path) = config.index_path {
+        if path.exists() {
+            if !path.is_file() {
+                return Err(error::Error::Error("override index path is not a file".into()));
+            }
+
+            if path.is_relative() {
+                path = canonicalize(path)?;
+            }
+
+            if let Err(err) = hb.register_template_file("page/index", &path) {
+                template_errors.push(err);
+            }
+        }
+    }
 
     if template_errors.len() > 0 {
         let mut msg = "there were errors when attempting to load templates:\n".to_owned();
