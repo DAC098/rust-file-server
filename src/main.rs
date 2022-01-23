@@ -51,9 +51,9 @@ fn main_entry() -> error::Result<i32> {
         );
     }
 
-    let conf = config::validate_server_config(
-        config::load_server_config(config_files)?
-    )?;
+    let conf = config::load_server_config(config_files)?;
+
+    println!("{:#?}", conf);
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_io()

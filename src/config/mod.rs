@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::convert::{From, TryFrom};
+use std::convert::{TryFrom, TryInto};
 use std::net::{SocketAddr, IpAddr};
 use std::fs::canonicalize;
+use std::io::ErrorKind as IoErrorKind;
 
 use shape_rs::MapShape;
 
@@ -19,24 +21,26 @@ pub struct DBConfig {
     pub port: u16
 }
 
-impl From<Option<shape::DBShape>> for DBConfig {
-    fn from(value: Option<shape::DBShape>) -> DBConfig {
+impl TryFrom<Option<shape::DBShape>> for DBConfig {
+    type Error = error::Error;
+
+    fn try_from(value: Option<shape::DBShape>) -> error::Result<DBConfig> {
         if let Some(v) = value {
-            DBConfig {
+            Ok(DBConfig {
                 username: v.username.unwrap_or("postgres".to_owned()),
                 password: v.password.unwrap_or("".to_owned()),
                 database: v.database.unwrap_or("file_server".to_owned()),
                 hostname: v.hostname.unwrap_or("localhost".to_owned()),
                 port: v.port.unwrap_or(5432)
-            }
+            })
         } else {
-            DBConfig {
+            Ok(DBConfig {
                 username: "postgres".to_owned(),
                 password: "".to_owned(),
                 database: "file_server".to_owned(),
                 hostname: "localhost".to_owned(),
                 port: 5432
-            }
+            })
         }
     }
 }
@@ -50,24 +54,26 @@ pub struct EmailConfig {
     pub relay: Option<String>
 }
 
-impl From<Option<shape::EmailShape>> for EmailConfig {
-    fn from(value: Option<shape::EmailShape>) -> EmailConfig {
+impl TryFrom<Option<shape::EmailShape>> for EmailConfig {
+    type Error = error::Error;
+
+    fn try_from(value: Option<shape::EmailShape>) -> error::Result<EmailConfig> {
         if let Some(v) = value {
-            EmailConfig {
+            Ok(EmailConfig {
                 enable: v.enable.unwrap_or(false),
                 from: v.from,
                 username: v.username,
                 password: v.password,
                 relay: v.relay
-            }
+            })
         } else {
-            EmailConfig {
+            Ok(EmailConfig {
                 enable: false,
                 from: None,
                 username: None,
                 password: None,
                 relay: None
-            }
+            })
         }
     }
 }
@@ -79,20 +85,22 @@ pub struct ServerInfoConfig {
     pub name: String
 }
 
-impl From<Option<shape::ServerInfoShape>> for ServerInfoConfig {
-    fn from(value: Option<shape::ServerInfoShape>) -> ServerInfoConfig {
+impl TryFrom<Option<shape::ServerInfoShape>> for ServerInfoConfig {
+    type Error = error::Error;
+
+    fn try_from(value: Option<shape::ServerInfoShape>) -> error::Result<ServerInfoConfig> {
         if let Some(v) = value {
-            ServerInfoConfig {
+            Ok(ServerInfoConfig {
                 secure: v.secure.unwrap_or(false),
                 origin: v.origin.unwrap_or("".to_owned()),
                 name: v.name.unwrap_or("File Server".to_owned())
-            }
+            })
         } else {
-            ServerInfoConfig {
+            Ok(ServerInfoConfig {
                 secure: false,
                 origin: "".to_owned(),
                 name: "File Server".to_owned()
-            }
+            })
         }
     }
 }
@@ -104,22 +112,24 @@ pub struct TemplateConfig {
     pub index_path: Option<PathBuf>
 }
 
-impl From<Option<shape::TemplateShape>> for TemplateConfig {
-    fn from(value: Option<shape::TemplateShape>) -> TemplateConfig {
+impl TryFrom<Option<shape::TemplateShape>> for TemplateConfig {
+    type Error = error::Error;
+
+    fn try_from(value: Option<shape::TemplateShape>) -> error::Result<TemplateConfig> {
         let default_dir = std::env::current_dir().unwrap_or(PathBuf::new());
 
         if let Some(v) = value {
-            TemplateConfig {
+            Ok(TemplateConfig {
                 directory: v.directory.unwrap_or(default_dir),
                 dev_mode: v.dev_mode.unwrap_or(false),
                 index_path: v.index_path
-            }
+            })
         } else {
-            TemplateConfig {
+            Ok(TemplateConfig {
                 directory: default_dir,
                 dev_mode: false,
                 index_path: None
-            }
+            })
         }
     }
 }
@@ -131,20 +141,22 @@ pub struct SslConfig {
     pub cert: Option<PathBuf>
 }
 
-impl From<Option<shape::SslShape>> for SslConfig {
-    fn from(value: Option<shape::SslShape>) -> SslConfig {
+impl TryFrom<Option<shape::SslShape>> for SslConfig {
+    type Error = error::Error;
+
+    fn try_from(value: Option<shape::SslShape>) -> error::Result<SslConfig> {
         if let Some(v) = value {
-            SslConfig {
+            Ok(SslConfig {
                 enable: v.enable.unwrap_or(false),
                 key: v.key,
                 cert: v.cert
-            }
+            })
         } else {
-            SslConfig {
+            Ok(SslConfig {
                 enable: false,
                 key: None,
                 cert: None
-            }
+            })
         }
     }
 }
@@ -154,16 +166,18 @@ pub struct WatcherConfig {
     pub enable: bool
 }
 
-impl From<Option<shape::WatcherShape>> for WatcherConfig {
-    fn from(value: Option<shape::WatcherShape>) -> WatcherConfig {
+impl TryFrom<Option<shape::WatcherShape>> for WatcherConfig {
+    type Error = error::Error;
+
+    fn try_from(value: Option<shape::WatcherShape>) -> error::Result<WatcherConfig> {
         if let Some(v) = value {
-            WatcherConfig {
+            Ok(WatcherConfig {
                 enable: v.enable.unwrap_or(false)
-            }
+            })
         } else {
-            WatcherConfig {
+            Ok(WatcherConfig {
                 enable: false
-            }
+            })
         }
     }
 }
@@ -188,26 +202,64 @@ impl BindInterfaceConfig {
 }
 
 #[derive(Debug)]
+pub struct StorageStaticConfig {
+    pub directories: HashMap<String, PathBuf>,
+    pub files: HashMap<String, PathBuf>
+}
+
+impl TryFrom<Option<shape::StorageStaticShape>> for StorageStaticConfig {
+    type Error = error::Error;
+
+    fn try_from(value: Option<shape::StorageStaticShape>) -> error::Result<StorageStaticConfig> {
+        if let Some(v) = value {
+            Ok(StorageStaticConfig {
+                directories: v.directories.unwrap_or_default(),
+                files: v.files.unwrap_or_default()
+            })
+        } else {
+            Ok(StorageStaticConfig {
+                directories: Default::default(),
+                files: Default::default()
+            })
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct StorageConfig {
     pub directory: PathBuf,
     pub temporary: PathBuf,
     pub web_static: Option<PathBuf>,
+    pub static_: StorageStaticConfig
 }
 
-impl From<Option<shape::StorageShape>> for StorageConfig {
-    fn from(value: Option<shape::StorageShape>) -> StorageConfig {
+impl TryFrom<Option<shape::StorageShape>> for StorageConfig {
+    type Error = error::Error;
+
+    fn try_from(value: Option<shape::StorageShape>) -> error::Result<StorageConfig> {
         if let Some(v) = value {
-            StorageConfig {
-                directory: v.directory.unwrap_or(PathBuf::new()),
-                temporary: v.temporary.unwrap_or(PathBuf::new()),
-                web_static: v.web_static
+            if v.directory.is_none() {
+                return Err(error::Error::InvalidConfig(
+                    format!("missing conf.storage.directory")
+                ))
             }
+
+            if v.temporary.is_none() {
+                return Err(error::Error::InvalidConfig(
+                    format!("missing conf.storage.temporary")
+                ))
+            }
+
+            Ok(StorageConfig {
+                directory: v.directory.unwrap(),
+                temporary: v.temporary.unwrap(),
+                web_static: v.web_static,
+                static_: v.static_.try_into()?
+            })
         } else {
-            StorageConfig {
-                directory: PathBuf::new(),
-                temporary: PathBuf::new(),
-                web_static: None
-            }
+            Err(error::Error::InvalidConfig(
+                format!("missing conf.storage.directory and conf.storage.temporary")
+            ))
         }
     }
 }
@@ -217,16 +269,18 @@ pub struct SecurityConfig {
     pub secret: String
 }
 
-impl From<Option<shape::SecurityShape>> for SecurityConfig {
-    fn from(value: Option<shape::SecurityShape>) -> SecurityConfig {
+impl TryFrom<Option<shape::SecurityShape>> for SecurityConfig {
+    type Error = error::Error;
+
+    fn try_from(value: Option<shape::SecurityShape>) -> error::Result<SecurityConfig> {
         if let Some(v) = value {
-            SecurityConfig {
+            Ok(SecurityConfig {
                 secret: v.secret.unwrap_or(String::new())
-            }
+            })
         } else {
-            SecurityConfig {
+            Ok(SecurityConfig {
                 secret: String::new()
-            }
+            })
         }
     }
 }
@@ -250,8 +304,10 @@ pub struct ServerConfig {
     pub security: SecurityConfig,
 }
 
-impl From<shape::ServerShape> for ServerConfig {
-    fn from(server_shape: shape::ServerShape) -> ServerConfig {
+impl TryFrom<shape::ServerShape> for ServerConfig {
+    type Error = error::Error;
+
+    fn try_from(server_shape: shape::ServerShape) -> error::Result<ServerConfig> {
         let mut bind: Vec<BindInterfaceConfig>;
 
         if let Some(interfaces) = server_shape.bind {
@@ -268,21 +324,21 @@ impl From<shape::ServerShape> for ServerConfig {
             bind = Vec::new();
         }
 
-        ServerConfig {
-            storage: server_shape.storage.into(),
+        Ok(ServerConfig {
+            storage: server_shape.storage.try_into()?,
             bind,
             threads: server_shape.threads.unwrap_or(num_cpus::get()),
             backlog: server_shape.backlog.unwrap_or(2048),
             max_connections: server_shape.max_connections.unwrap_or(25000),
             max_connection_rate: server_shape.max_connection_rate.unwrap_or(256),
-            db: server_shape.db.into(),
-            email: server_shape.email.into(),
-            info: server_shape.info.into(),
-            ssl: server_shape.ssl.into(),
-            template: server_shape.template.into(),
-            watcher: server_shape.watcher.into(),
-            security: server_shape.security.into()
-        }
+            db: server_shape.db.try_into()?,
+            email: server_shape.email.try_into()?,
+            info: server_shape.info.try_into()?,
+            ssl: server_shape.ssl.try_into()?,
+            template: server_shape.template.try_into()?,
+            watcher: server_shape.watcher.try_into()?,
+            security: server_shape.security.try_into()?
+        })
     }
 }
 
@@ -290,52 +346,16 @@ pub fn load_server_config(files: Vec<PathBuf>) -> error::Result<ServerConfig> {
     let mut base_shape = shape::ServerShape::default();
 
     for file in files {
-        base_shape.map_shape(shape::ServerShape::try_from(file)?);
-    }
+        let shape = shape::ServerShape::try_from(&file)?;
+        let parent = file.parent().unwrap();
 
-    Ok(base_shape.into())
-}
-
-fn validate_storage_dir(name: &str, path: PathBuf) -> error::Result<PathBuf> {
-    if !path.exists() {
-        Err(error::Error::InvalidConfig(
-            format!("requested {} directory does not exist. given: \"{}\"", name, path.display())
-        ))
-    } else if !path.is_dir() {
-        Err(error::Error::InvalidConfig(
-            format!("requested {} directory is not a directory. given: \"{}\"", name, path.display())
-        ))
-    } else if !path.is_absolute() {
-        canonicalize(&path).map_err(|op| op.into())
-    } else {
-        Ok(path)
-    }
-}
-
-pub fn validate_server_config(mut conf: ServerConfig) -> error::Result<ServerConfig> {
-    conf.storage.directory = validate_storage_dir(
-        "file storage (conf.storage.directory)", 
-        conf.storage.directory
-    )?;
-    conf.storage.temporary = validate_storage_dir(
-        "temporary (conf.storage.temporary)", 
-        conf.storage.temporary
-    )?;
-
-    if let Some(web_static) = conf.storage.web_static {
-        conf.storage.web_static = Some(validate_storage_dir(
-            "web static (conf.storage.web_static)", 
-            web_static
+        base_shape.map_shape(shape::validate_server_shape(
+            &parent,
+            shape
         )?);
     }
 
-    if conf.bind.is_empty() {
-        return Err(error::Error::InvalidConfig(
-            format!("no bind interfaces where specified")
-        ));
-    }
-
-    Ok(conf)
+    base_shape.try_into()
 }
 
 pub fn get_config_file(path: &String) -> error::Result<PathBuf> {

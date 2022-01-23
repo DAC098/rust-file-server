@@ -7,7 +7,6 @@ use hyper::server::conn::AddrStream;
 use hyper::{Request, Response, Body, Error, Method};
 use hyper::service::Service;
 
-use crate::components::html::{check_if_html, responed_index_html};
 use crate::db::ArcDBState;
 use crate::http::response::okay_response;
 use crate::snowflakes::IdSnowflakes;

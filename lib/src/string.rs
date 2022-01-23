@@ -1,4 +1,4 @@
-use std::path::{PathBuf};
+use std::path::PathBuf;
 
 pub fn name_from_pathbuf(path: &PathBuf) -> Option<String> {
     if let Some(name) = path.file_name() {

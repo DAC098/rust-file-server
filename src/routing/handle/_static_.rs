@@ -1,3 +1,5 @@
+use std::{path::PathBuf, fmt::Write};
+
 use hyper::{Method, Body};
 use tokio::fs::File as TokioFile;
 use tokio_util::codec::{FramedRead, BytesCodec};
@@ -6,9 +8,48 @@ use crate::{http::{Request, Response, error::Result, error::Error, response, mim
 
 pub async fn handle_req(req: Request) -> Result<Response> {
     let (mut head, _) = req.into_parts();
+    let lookup = head.uri.path().to_owned();
     let storage = head.extensions.remove::<ArcStorageState>().unwrap();
+    let mut to_send: Option<PathBuf> = None;
 
-    if let Some(web_static) = storage.web_static.as_ref() {
+    if let Some(file_path) = storage.static_resources.files.get(&lookup) {
+        to_send = Some(file_path.clone())
+    } else {
+        for (key, path) in storage.static_resources.directories.iter() {
+            if lookup.starts_with(key.as_str()) {
+                let stripped = lookup.strip_prefix(key.as_str()).unwrap();
+                let mut sanitized = String::with_capacity(stripped.len());
+                let mut first = true;
+
+                for value in stripped.split("/") {
+                    if value == ".." || value == "." || value.len() == 0 {
+                        return Err(Error {
+                            status: 400,
+                            name: "MalformedResourcePath".into(),
+                            msg: format!("resource path given contains invalid segments. \"..\", \".\", and \"\" are not allowed in the path"),
+                            source: None
+                        })
+                    }
+
+                    if first {
+                        first = false;
+                    } else {
+                        sanitized.write_char('/')?;
+                    }
+
+                    sanitized.write_str(value)?;
+                }
+
+                let mut file_path = path.clone();
+                file_path.push(sanitized);
+
+                to_send = Some(file_path);
+                break;
+            }
+        }
+    }
+
+    if let Some(file_path) = to_send {
         if head.method != Method::GET {
             return Err(Error {
                 status: 405,
@@ -17,16 +58,6 @@ pub async fn handle_req(req: Request) -> Result<Response> {
                 source: None
             })
         }
-
-        let req_path = {
-            if head.uri.path().starts_with("/static/") {
-                head.uri.path().strip_prefix("/static/").unwrap()
-            } else {
-                head.uri.path().strip_prefix("/").unwrap_or("")
-            }
-        };
-        let mut file_path = web_static.clone();
-        file_path.push(&req_path);
 
         if file_path.exists() && file_path.is_file() {
             return Ok(response::build()

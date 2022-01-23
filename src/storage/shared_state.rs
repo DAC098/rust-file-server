@@ -1,12 +1,20 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::path::PathBuf;
 
 use crate::config::StorageConfig;
 
+pub struct StaticResources {
+    pub directories: HashMap<String, PathBuf>,
+    pub files: HashMap<String, PathBuf>
+}
+
 pub struct StorageState {
     pub directory: PathBuf,
     pub temporary: PathBuf,
     pub web_static: Option<PathBuf>,
+    
+    pub static_resources: StaticResources
 }
 
 pub type ArcStorageState = Arc<StorageState>;
@@ -41,7 +49,11 @@ impl From<StorageConfig> for ArcStorageState {
         Arc::new(StorageState {
             directory: storage.directory,
             temporary: storage.temporary,
-            web_static: storage.web_static
+            web_static: storage.web_static,
+            static_resources: StaticResources {
+                directories: storage.static_.directories,
+                files: storage.static_.files
+            }
         })
     }
 }

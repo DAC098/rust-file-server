@@ -1,7 +1,25 @@
-use std::ffi::OsStr;
+use std::{ffi::OsStr, collections::HashMap};
 
 use hyper::HeaderMap;
 use mime::Mime;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref EXT_MIME_MAP: HashMap<&'static OsStr, &'static str> = {
+        let mut m: HashMap<&'static OsStr, &'static str> = HashMap::new();
+        m.insert(OsStr::new("jpg"), "image/jpeg");
+        m.insert(OsStr::new("jpeg"), "image/jpeg");
+        m.insert(OsStr::new("png"), "image/png");
+        m.insert(OsStr::new("gif"), "image/gif");
+        m.insert(OsStr::new("svg"), "image/svg+xml");
+        m.insert(OsStr::new("webp"),"image/webp");
+        m.insert(OsStr::new("css"), "text/css");
+        m.insert(OsStr::new("ico"), "image/x-icon");
+        m.insert(OsStr::new("js"), "application/javascript");
+        m.insert(OsStr::new("json"), "application/json");
+        m
+    };
+}
 
 use crate::http::error;
 
@@ -25,21 +43,13 @@ where
 }
 
 pub fn mime_type_from_ext(ext: Option<&OsStr>) -> Mime {
-    (if let Some(ext) = ext {
-        if ext.eq_ignore_ascii_case("jpg") || ext.eq_ignore_ascii_case("jpeg") {
-            "image/jpeg"
-        } else if ext.eq_ignore_ascii_case("png") {
-            "image/png"
-        } else if ext.eq_ignore_ascii_case("gif") {
-            "image/gif"
-        } else if ext.eq_ignore_ascii_case("svg") {
-            "image/svg+xml"
-        } else if ext.eq_ignore_ascii_case("webp") {
-            "image/webp"
+    if let Some(ext) = ext {
+        if let Some(mime_str) = EXT_MIME_MAP.get(ext) {
+            (*mime_str).parse().unwrap()
         } else {
-            "application/octet-stream"
+            mime::APPLICATION_OCTET_STREAM
         }
     } else {
-        "application/octet-stream"
-    }).parse().unwrap()
+        mime::APPLICATION_OCTET_STREAM
+    }
 }

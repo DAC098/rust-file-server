@@ -3,8 +3,6 @@ use std::sync::Arc;
 use handlebars::{Handlebars, RenderError};
 use serde::Serialize;
 
-use crate::error;
-
 // so as of writing this, the handlebars render
 // processes does support sending information into some form of output but not
 // in a streaming fashion and I don't think there is any asynchronous behavior

@@ -96,13 +96,13 @@ impl RetrieveSession {
 }
 
 pub fn login_redirect(current: &Uri) -> Result<Response> {
-    let redirect_path = urlencoding::encode(
+    let redirect_path = format!("/auth/session?jump_to={}", urlencoding::encode(
         if let Some(pq) = current.path_and_query() {
             pq.as_str()
         } else {
             current.path()
         }
-    );
+    ));
 
     redirect_response(&redirect_path)
 }

@@ -17,7 +17,8 @@ pub enum Error {
     JsonError(serde_json::Error),
     YamlError(serde_yaml::Error),
 
-    IOError(std::io::Error)
+    IOError(std::io::Error),
+    FMTError(std::fmt::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -48,13 +49,10 @@ impl fmt::Display for Error {
                 }
             },
             Error::YamlError(err) => {
-                if let Some(location) = err.location() {
-                    write!(f, "yaml error {}:{}", location.line(), location.column())
-                } else {
-                    write!(f, "yaml error")
-                }
+                write!(f, "yaml error {}", err.to_string())
             },
-            Error::IOError(err) => write!(f, "{:?}", err)
+            Error::IOError(err) => write!(f, "std::io::Error {:?}", err),
+            Error::FMTError(err) => write!(f, "std::fmt::Error {:?}", err),
         }
     }
 }
@@ -85,5 +83,11 @@ impl From<serde_yaml::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {
         Error::IOError(error)
+    }
+}
+
+impl From<std::fmt::Error> for Error {
+    fn from(error: std::fmt::Error) -> Self {
+        Error::FMTError(error)
     }
 }
