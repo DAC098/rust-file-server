@@ -1,6 +1,7 @@
 use argon2::verify_encoded;
 use hyper::{Body, header::SET_COOKIE};
 use serde::Deserialize;
+use serde_json::json;
 use tokio_postgres::GenericClient;
 
 use crate::{
@@ -9,11 +10,11 @@ use crate::{
         error::Result,
         error::Error,
         Response, 
-        response::{build, redirect_response}, 
+        response::{build, redirect_response, json_response}, 
         cookie::{get_cookie_map, SetCookie, SameSite}, 
         body::json_from_body
     }, 
-    db::{ArcDBState, record::UserSession}, components::{auth::RetrieveSession, html::response_index_html_parts}
+    db::{ArcDBState, record::UserSession}, components::{auth::RetrieveSession, html::{response_index_html_parts, check_if_html_headers}}
 };
 
 #[derive(Deserialize)]
@@ -57,6 +58,7 @@ async fn create_session(conn: &impl GenericClient, body: Body,) -> Result<Respon
         ).await?;
 
         let mut session_cookie = SetCookie::new("session_id".into(), token.to_string());
+        session_cookie.path = Some("/".into());
         session_cookie.max_age = Some(session_duration);
         session_cookie.same_site = Some(SameSite::Strict);
 
@@ -80,9 +82,17 @@ pub async fn handle_get(req: Request) -> Result<Response> {
     let db = head.extensions.remove::<ArcDBState>().unwrap();
     let conn = db.pool.get().await?;
 
-    match RetrieveSession::get(&head.headers, &*conn).await? {
-        RetrieveSession::Success(_) => redirect_response("/fs/"),
-        _ => response_index_html_parts(head)
+    if check_if_html_headers(&head.headers)? {
+        match RetrieveSession::get(&head.headers, &*conn).await? {
+            RetrieveSession::Success(_) => redirect_response("/fs/"),
+            _ => response_index_html_parts(head)
+        }
+    } else {
+        let json = json!({
+            "message": "noop"
+        });
+
+        json_response(200, &json)
     }
 }
 

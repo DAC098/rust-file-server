@@ -8,6 +8,7 @@ use hyper::{Request, Response, Body, Error, Method};
 use hyper::service::Service;
 
 use crate::db::ArcDBState;
+use crate::http::header::copy_header_value;
 use crate::http::response::okay_response;
 use crate::snowflakes::IdSnowflakes;
 use crate::storage::ArcStorageState;
@@ -44,7 +45,12 @@ impl<'a> Router<'a> {
         let path = url.path();
         let method = req.method();
 
-        if path.starts_with("/auth/") {
+        if path == "/" {
+            return match *method {
+                Method::GET => handle::handle_get(req).await,
+                _ => Err(method_not_allowed())
+            }
+        } else if path.starts_with("/auth/") {
             if path == "/auth/session" {
                 return match *method {
                     Method::GET => handle::auth::session::handle_get(req).await,
@@ -62,7 +68,7 @@ impl<'a> Router<'a> {
             if path == "/admin/users" {
                 return match *method {
                     Method::GET => okay_response(req),
-                    Method::POST => okay_response(req),
+                    Method::POST => handle::admin::users::handle_post(req).await,
                     Method::DELETE => okay_response(req),
                     _ => Err(method_not_allowed())
                 }
@@ -127,11 +133,16 @@ impl Service<Request<Body>> for Router<'static> {
         extensions_ref.insert(self.snowflakes.clone());
 
         Box::pin(async move {
+            let remote_addr = copy_header_value(req.headers(), "x-forwarded-for");
+            let remote_port = copy_header_value(req.headers(), "x-forwarded-port");
             let version = format!("{:?}", req.version());
             let method = req.method().as_str().to_owned();
             let path = req.uri().path().to_owned();
             let query = if let Some(q) = req.uri().query() {
-                format!("?{}", q)
+                let mut query = String::with_capacity(q.len() + 1);
+                query.push('?');
+                query.push_str(q);
+                query
             } else {
                 String::new()
             };
@@ -153,17 +164,57 @@ impl Service<Request<Body>> for Router<'static> {
             };
 
             if let Ok(res) = rtn.as_ref() {
-                let duration = start.elapsed();
+                let duration = {
+                    let d = start.elapsed();
+                    format_duration(&d)
+                };
+                let status = {
+                    let s = res.status();
+                    s.as_str().to_owned()
+                };
+                let mut msg = String::new();
 
-                println!(
-                    "{} {} {}{} {} {} {}",
-                    connection,
-                    method,
-                    path, query,
-                    version,
-                    res.status(),
-                    format_duration(&duration)
+                if remote_addr.is_some() && remote_port.is_some() {
+                    let remote_addr = remote_addr.unwrap();
+                    let remote_port = remote_port.unwrap();
+
+                    if remote_addr.is_ok() && remote_port.is_ok() {
+                        let addr = remote_addr.unwrap();
+                        let port = remote_port.unwrap();
+
+                        msg.reserve(addr.len() + 1 + port.len());
+                        msg.push_str(addr.as_str());
+                        msg.push(':');
+                        msg.push_str(port.as_str());
+                    } else {
+                        msg.push_str(connection.as_str());
+                    }
+                } else {
+                    msg.push_str(connection.as_str());
+                }
+
+                msg.reserve(
+                    method.len() + 
+                    path.len() + 
+                    query.len() + 
+                    version.len() +
+                    status.len() +
+                    duration.len() +
+                    5
                 );
+                msg.push(' ');
+                msg.push_str(method.as_str());
+                msg.push(' ');
+                msg.push_str(path.as_str());
+                msg.push_str(query.as_str());
+                msg.push(' ');
+                msg.push_str(version.as_str());
+                msg.push(' ');
+                msg.push_str(status.as_str());
+                msg.push(' ');
+                msg.push_str(duration.as_str());
+
+                println!("{}", msg);
             }
 
             rtn

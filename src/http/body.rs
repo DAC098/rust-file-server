@@ -1,6 +1,10 @@
+use std::path::Path;
+
 use futures::StreamExt;
 use hyper::Body;
 use serde::de::DeserializeOwned;
+use tokio::fs::{File, OpenOptions};
+use tokio::io::AsyncWriteExt;
 
 use crate::http::{
     error::Result,
@@ -61,4 +65,21 @@ where
     };
 
     rtn
+}
+
+pub async fn file_from_body<T>(path: T, open: bool, mut body: Body) -> Result<File>
+where
+    T: AsRef<Path> 
+{
+    let mut options = OpenOptions::new();
+    options.write(true);
+    options.create(!open);
+    let mut file = options.open(path).await?;
+
+    while let Some(chunk) = body.next().await {
+        let bytes = chunk?;
+        file.write(&bytes).await?;
+    }
+
+    Ok(file)
 }

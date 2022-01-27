@@ -1,12 +1,13 @@
-use chrono::{DateTime, Utc, serde::ts_seconds, };
+use chrono::{DateTime, Utc, serde::ts_seconds, serde::ts_seconds_option };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use serde_repr::{Serialize_repr, Deserialize_repr};
 use tokio_postgres::GenericClient;
 
 use crate::db::types::Result;
 
 #[repr(i16)]
-#[derive(PartialEq, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Clone, Serialize_repr, Deserialize_repr)]
 pub enum FsItemType {
     Unknown = 0,
     File = 1,
@@ -49,8 +50,8 @@ pub struct FsItem {
     pub basename: String,
     #[serde(with = "ts_seconds")]
     pub created: DateTime<Utc>,
-    #[serde(with = "ts_seconds")]
-    pub modified: DateTime<Utc>,
+    #[serde(with = "ts_seconds_option")]
+    pub modified: Option<DateTime<Utc>>,
     pub user_data: Value,
     pub is_root: bool
 }
@@ -58,35 +59,18 @@ pub struct FsItem {
 
 
 impl FsItem {
-    pub async fn find_path(conn: &impl GenericClient, users_id: &i64, path: &str) -> Result<Option<Self>> {
-        let mut first = true;
-        let mut first_dir = true;
-        let mut directory = String::new();
-        let mut basename = String::new();
-        let path_split_iter = path.split('/');
 
-        for item in path_split_iter {
-            if first {
-                basename = item.to_owned();
-                first = false;
-            } else {
-                if first_dir {
-                    first_dir = false;
-                } else {
-                    directory.push('/');
-                }
-
-                directory.push_str(&basename);
-                basename = item.to_owned();
-            }
-        }
-
+    async fn find_user_id_directory_basename(
+        conn: &impl GenericClient, 
+        users_id: &i64,
+        directory: &String,
+        basename: &String
+    ) -> Result<Option<FsItem>> {
         if let Some(record) = conn.query_opt(
             "\
             select id, \
                    item_type, \
                    parent, \
-                   users_id, \
                    created, \
                    modified, \
                    user_data, \
@@ -101,17 +85,25 @@ impl FsItem {
                 id: record.get(0),
                 item_type: record.get::<usize, i16>(1).into(),
                 parent: record.get(2),
-                users_id: record.get(3),
-                directory,
-                basename,
-                created: record.get(4),
-                modified: record.get(5),
-                user_data: record.get(6),
-                is_root: record.get(7),
+                users_id: users_id.clone(),
+                directory: directory.clone(),
+                basename: basename.clone(),
+                created: record.get(3),
+                modified: record.get(4),
+                user_data: record.get(5),
+                is_root: record.get(6),
             }))
         } else {
             Ok(None)
         }
+    }
+
+    pub async fn find_path(conn: &impl GenericClient, users_id: &i64, path: &String) -> Result<Option<Self>> {
+        println!("FsItem::find_path users_id: {} path: \"{}\"", users_id, path);
+
+        let (directory, basename) = lib::string::get_directory_and_basename(path.as_str());
+
+        FsItem::find_user_id_directory_basename(conn, users_id, &directory, &basename).await
     }
 
     pub async fn find_basename_with_parent(conn: &impl GenericClient, parent: &i64, basename: &String) -> Result<Option<FsItem>> {

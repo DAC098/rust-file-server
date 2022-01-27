@@ -2,7 +2,7 @@ create table fs_items (
     id bigint not null primary key,
     item_type smallint not null,
     parent bigint,
-    users_id integer not null,
+    users_id bigint not null,
 
     directory varchar not null,
     basename varchar not null,
@@ -10,7 +10,7 @@ create table fs_items (
     created timestamp with time zone not null,
     modified timestamp with time zone,
 
-    user_data json,
+    user_data json not null,
 
     is_root boolean not null default false,
 

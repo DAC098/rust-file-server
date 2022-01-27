@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::convert::{TryFrom, TryInto};
 use std::net::{SocketAddr, IpAddr};
-use std::fs::canonicalize;
-use std::io::ErrorKind as IoErrorKind;
 
 use shape_rs::MapShape;
 

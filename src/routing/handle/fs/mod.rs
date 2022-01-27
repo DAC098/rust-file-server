@@ -2,12 +2,11 @@ use std::collections::HashSet;
 use std::io::ErrorKind;
 
 use chrono::Utc;
-use futures::{StreamExt, pin_mut, TryStreamExt};
+use futures::{pin_mut, TryStreamExt};
 use hyper::http::request::Parts;
 use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
 use tokio::fs::{File as TokioFile, create_dir, remove_file, remove_dir};
-use tokio::io::AsyncWriteExt;
 use tokio_util::codec::{FramedRead, BytesCodec};
 use hyper::{Body, Uri};
 
@@ -16,7 +15,7 @@ use crate::components::html::{check_if_html_headers, response_index_html_parts};
 use crate::db::record::{FsItem, FsItemType, User};
 use crate::db::ArcDBState;
 use crate::db::types::PoolConn;
-use crate::http::body::json_from_body;
+use crate::http::body::{json_from_body, file_from_body};
 use crate::http::{Request, Response};
 use crate::http::{
     error::{Error, Result},
@@ -50,29 +49,22 @@ fn root_strip(uri: &Uri) -> &str {
     uri.path().strip_prefix("/fs/").unwrap()
 }
 
-fn get_directory_and_basename(path: &str) -> (String, String) {
-    let mut rtn = String::new();
-    let mut working = String::new();
+fn file_record_path(id: &i64, path: &str) -> String {
+    let id_str = id.to_string();
 
-    for ch in path.chars() {
-        if ch == '/' {
-            rtn.push('/');
-            rtn.push_str(working.as_str());
-            working.clear();
-        } else {
-            working.push(ch);
-        }
+    if path.len() == 0 {
+        id_str
+    } else {
+        let mut rtn = String::with_capacity(id_str.len() + 1 + path.len());
+        rtn.push_str(id_str.as_str());
+        rtn.push('/');
+        rtn.push_str(path);
+        rtn
     }
-
-    working.shrink_to_fit();
-
-    (rtn, working)
 }
 
 pub async fn handle_get(req: Request) -> Result<Response> {
     let (mut head, _) = req.into_parts();
-    let stripped_root = root_strip(&head.uri);
-
     let db = head.extensions.remove::<ArcDBState>().unwrap();
     let conn = db.pool.get().await?;
     let session = components::auth::RetrieveSession::get(&head.headers, &*conn).await?;
@@ -85,8 +77,9 @@ pub async fn handle_get(req: Request) -> Result<Response> {
     }
 
     let user = session.try_into_user()?;
+    let find_path = file_record_path(&user.id, root_strip(&head.uri));
 
-    if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, stripped_root).await? {
+    if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
         let query_map = uri::QueryMap::new(&head.uri);
         let wants_download = query_map.has_key("download");
 
@@ -95,14 +88,28 @@ pub async fn handle_get(req: Request) -> Result<Response> {
                 if wants_download {
                     handle_get_file_download(head, user, fs_item).await
                 } else {
-                    handle_get_file_info(head, fs_item).await
+                    let json = json!({
+                        "message": "successful",
+                        "payload": fs_item
+                    });
+                
+                    response::json_response(200, &json)
                 }
             },
             FsItemType::Dir => {
                 if wants_download {
                     handle_get_dir_download(head, fs_item).await
                 } else {
-                    handle_get_dir_info(head, conn, user, fs_item).await
+                    let dir_items = FsItem::find_dir_contents(&*conn, &user.id, &Some(fs_item.id)).await?;
+                    let json = json!({
+                        "message": "successful",
+                        "payload": {
+                            "directory": fs_item,
+                            "contents": dir_items
+                        }
+                    });
+
+                    response::json_response(200, &json)
                 }
             },
             FsItemType::Unknown => {
@@ -141,7 +148,6 @@ async fn handle_get_dir_download(head: Parts, _fs_item: FsItem) -> Result<Respon
 async fn handle_get_file_download(head: Parts, user: User, fs_item: FsItem) -> Result<Response> {
     let storage = head.extensions.get::<ArcStorageState>().unwrap();
     let mut path = storage.directory.clone();
-    path.push(&user.username);
     path.push(&fs_item.directory);
     path.push(&fs_item.basename);
 
@@ -156,57 +162,14 @@ async fn handle_get_file_download(head: Parts, user: User, fs_item: FsItem) -> R
         ))?)
 }
 
-async fn handle_get_dir_info(head: Parts, conn: PoolConn<'_>, user: User, fs_item: FsItem) -> Result<Response> {
-    let accepting = mime::get_accepting_default(&head.headers, "text/plain")?;
-    let dir_items = FsItem::find_dir_contents(&*conn, &user.id, &Some(fs_item.id)).await?;
-
-    for accept in accepting {
-        if accept.type_() == "application" {
-            if accept.subtype() == "json" {
-                return response::json_response(200, &dir_items);
-            }
-        }
-    }
-
-    Ok(response::build()
-        .status(400)
-        .header("content-type", "text/plain")
-        .body("unknown accept header value".into())?)
-}
-
-async fn handle_get_file_info(head: Parts, fs_item: FsItem) -> Result<Response> {
-    let accepting = mime::get_accepting_default(&head.headers, "text/plain")?;
-
-    for accept in accepting {
-        if accept.type_() == "application" {
-            if accept.subtype() == "json" {
-                return response::json_response(200, &fs_item);
-            }
-        }
-    }
-
-    Err(Error {
-        status: 400,
-        name: "UnknownAcceptHeader".to_owned(),
-        msg: "unknown accept header value".to_owned(),
-        source: None
-    })
-}
-
 pub async fn handle_post(req: Request) -> Result<Response> {
-    let (mut head, mut body) = req.into_parts();
+    let (mut head, body) = req.into_parts();
+    let db = head.extensions.remove::<ArcDBState>().unwrap();
+    let mut conn = db.pool.get().await?;
+    let user = RetrieveSession::get(&head.headers, &*conn).await?.try_into_user()?;
+
     let fs_root = root_strip(&head.uri);
-
-    if fs_root == "" {
-        return Err(Error {
-            status: 400,
-            name: "CannotPostRoot".to_owned(),
-            msg: "you cannot post the root directory".to_owned(),
-            source: None
-        });
-    }
-
-    let (mut directory, mut basename) = get_directory_and_basename(fs_root);
+    let (mut directory, mut basename) = lib::string::get_directory_and_basename(&fs_root);
     basename = basename.trim().to_owned();
 
     if basename.is_empty() {
@@ -218,17 +181,9 @@ pub async fn handle_post(req: Request) -> Result<Response> {
         });
     }
 
-    let db = head.extensions.remove::<ArcDBState>().unwrap();
-    let mut conn = db.pool.get().await?;
-    let user = RetrieveSession::get(&head.headers, &*conn).await?.try_into_user()?;
+    directory = file_record_path(&user.id, directory.as_str());
 
-    if directory.is_empty() {
-        directory = user.id.to_string();
-    } else {
-        directory = format!("{}/{}", user.id.to_string(), directory);
-    }
-
-    if let Some(fs_parent) = FsItem::find_path(&*conn, &user.id, &directory.as_str()).await? {
+    if let Some(fs_parent) = FsItem::find_path(&*conn, &user.id, &directory).await? {
         let mut post_type = "file";
         let mut override_existing = false;
         let post_path = {
@@ -322,14 +277,14 @@ pub async fn handle_post(req: Request) -> Result<Response> {
                 snowflakes.fs_items.next_id().await?
             };
             let created = Utc::now();
-            let modified = created.clone();
+            let modified = None;
             let user_data = json!({});
             let parent_id = Some(fs_parent.id);
             let fs_type_ref: i16 = fs_type.clone().into();
 
             transaction.execute(
                 "\
-                insert into fs_items (id, item_type, parent, users_id, directory, basename, created, modified, user_data) values \
+                insert into fs_items (id, item_type, parent, users_id, directory, basename, created, user_data) values \
                 ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                 &[
                     &id,
@@ -339,7 +294,6 @@ pub async fn handle_post(req: Request) -> Result<Response> {
                     &directory, 
                     &basename, 
                     &created, 
-                    &modified, 
                     &user_data,
                 ]
             ).await?;
@@ -358,25 +312,25 @@ pub async fn handle_post(req: Request) -> Result<Response> {
             }
         };
 
-        match &new_fs_item.item_type {
-            FsItemType::File => {
-                let mut file = TokioFile::create(post_path).await?;
+        {
+            let modified = Some(new_fs_item.created.clone());
 
-                while let Some(chunk) = body.next().await {
-                    let bytes = chunk?;
-                    file.write(&bytes).await?;
-                }
-            },
-            FsItemType::Dir => {
-                create_dir(&post_path).await?;
-            },
+            transaction.execute(
+                "update fs_items set modified = $2 where id = $1", 
+                &[&fs_parent.id, &modified]
+            ).await?;
+        }
+
+        match &new_fs_item.item_type {
+            FsItemType::File => {file_from_body(&post_path, false, body).await?;},
+            FsItemType::Dir => {create_dir(&post_path).await?;},
             _ => {}
         }
 
         transaction.commit().await?;
 
         let json = json!({
-            "msg": "successful",
+            "message": "successful",
             "payload": new_fs_item
         });
 
@@ -393,13 +347,12 @@ pub async fn handle_post(req: Request) -> Result<Response> {
 
 pub async fn handle_delete(req: Request) -> Result<Response> {
     let (mut head, _) = req.into_parts();
-    let fs_path = root_strip(&head.uri);
     let db = head.extensions.remove::<ArcDBState>().unwrap();
     let mut conn = db.pool.get().await?;
-
     let user = RetrieveSession::get(&head.headers, &*conn).await?.try_into_user()?;
-    
-    if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &fs_path).await? {
+    let find_path = file_record_path(&user.id, root_strip(&head.uri));
+
+    if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
         if fs_item.is_root {
             return Err(Error {
                 status: 400,
@@ -542,11 +495,21 @@ pub async fn handle_delete(req: Request) -> Result<Response> {
             ).await?;
         }
 
+        {
+            let modified = Some(chrono::Utc::now());
+
+            transaction.execute(
+                "update fs_items set modified = $2 where id = $1",
+                &[&fs_item.id, &modified]
+            ).await?;
+        }
+
         transaction.commit().await?;
 
         let rtn_json = json!({
             "message": "successful"
         });
+
         response::json_response(200, &rtn_json)
     } else {
         Err(Error {
@@ -558,7 +521,7 @@ pub async fn handle_delete(req: Request) -> Result<Response> {
     }
 }
 
-async fn handle_put_upload_action(storage: ArcStorageState, mut conn: PoolConn<'_>, mut fs_item: FsItem, mut body: Body) -> Result<Response> {
+async fn handle_put_upload_action(storage: ArcStorageState, mut conn: PoolConn<'_>, mut fs_item: FsItem, body: Body) -> Result<Response> {
     if fs_item.is_root {
         return Err(Error {
             status: 400,
@@ -582,16 +545,12 @@ async fn handle_put_upload_action(storage: ArcStorageState, mut conn: PoolConn<'
         path.push(&fs_item.basename);
         path
     };
-    let mut file = TokioFile::create(&file_path).await?;
 
-    while let Some(chunk) = body.next().await {
-        let bytes = chunk?;
-        file.write(&bytes).await?;
-    }
+    file_from_body(&file_path, true, body).await?;
 
     transaction.commit().await?;
 
-    fs_item.modified = modified;
+    fs_item.modified = Some(modified);
 
     let rtn_json = json!({
         "message": "successful",
@@ -622,13 +581,13 @@ async fn handle_put_user_data_action(mut conn: PoolConn<'_>, mut fs_item: FsItem
 
 pub async fn handle_put(req: Request) -> Result<Response> {
     let (mut head, body) = req.into_parts();
-    let fs_path = root_strip(&head.uri);
     let storage = head.extensions.remove::<ArcStorageState>().unwrap();
     let db = head.extensions.remove::<ArcDBState>().unwrap();
     let conn = db.pool.get().await?;
     let user = RetrieveSession::get(&head.headers, &*conn).await?.try_into_user()?;
+    let find_path = file_record_path(&user.id, root_strip(&head.uri));
 
-    if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &fs_path).await? {
+    if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
         let query_map = uri::QueryMap::new(&head.uri);
         let default_action = "upload".to_owned();
         let action = if let Some(action) = query_map.get_value("action") {

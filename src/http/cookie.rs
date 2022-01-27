@@ -92,6 +92,11 @@ impl SetCookie {
             rtn.push_str(domain.as_str());
         }
 
+        if let Some(path) = self.path {
+            rtn.push_str("; Path=");
+            rtn.push_str(path.as_str());
+        }
+
         if self.secure {
             rtn.push_str("; Secure");
         }

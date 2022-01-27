@@ -7,6 +7,7 @@ use crate::{
     db::record::{User, UserSession}
 };
 
+#[derive(Debug)]
 pub enum RetrieveSession {
     NoSessionId,
     InvalidSessionId,
