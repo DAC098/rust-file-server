@@ -11,9 +11,8 @@ use crate::{
         body::json_from_body, 
         cookie::{SetCookie, SameSite}, 
         response::build
-    }, 
-    db::ArcDBState,
-    security::argon::hash_with_default, components::auth::RetrieveSession
+    },
+    security::argon::hash_with_default, state::AppState, components::auth::get_session
 };
 
 #[derive(Deserialize)]
@@ -22,12 +21,11 @@ pub struct PasswordJson {
     new_password: String
 }
 
-pub async fn handle_post(req: Request) -> Result<Response> {
+pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> {
     let (head, body) = req.into_parts();
-    let db = head.extensions.get::<ArcDBState>().unwrap();
-    let mut conn = db.pool.get().await?;
+    let mut conn = state.db.pool.get().await?;
+    let (user, _) = get_session(&head.headers, &*conn).await?;
 
-    let user = RetrieveSession::get(&head.headers, &*conn).await?.try_into_user()?;
     let hash: String = {
         let res = conn.query_one(
             "select hash from users where id = $1",

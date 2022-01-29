@@ -14,7 +14,7 @@ use crate::{
         cookie::{get_cookie_map, SetCookie, SameSite}, 
         body::json_from_body
     }, 
-    db::{ArcDBState, record::UserSession}, components::{auth::RetrieveSession, html::{response_index_html_parts, check_if_html_headers}}
+    db::record::UserSession, components::{html::{response_index_html_parts, check_if_html_headers}, auth::get_session}, state::AppState
 };
 
 #[derive(Deserialize)]
@@ -77,29 +77,27 @@ async fn create_session(conn: &impl GenericClient, body: Body,) -> Result<Respon
     }
 }
 
-pub async fn handle_get(req: Request) -> Result<Response> {
-    let (mut head, _) = req.into_parts();
-    let db = head.extensions.remove::<ArcDBState>().unwrap();
-    let conn = db.pool.get().await?;
+pub async fn handle_get(state: AppState<'_>,req: Request) -> Result<Response> {
+    let (head, _) = req.into_parts();
+    let conn = state.db.pool.get().await?;
+    let session_check = get_session(&head.headers, &*conn).await;
 
     if check_if_html_headers(&head.headers)? {
-        match RetrieveSession::get(&head.headers, &*conn).await? {
-            RetrieveSession::Success(_) => redirect_response("/fs/"),
-            _ => response_index_html_parts(head)
+        match session_check {
+            Ok(_) => redirect_response("/fs/"),
+            Err(_) => response_index_html_parts(head)
         }
     } else {
-        let json = json!({
-            "message": "noop"
-        });
+        session_check?;
 
+        let json = json!({"message": "noop"});
         json_response(200, &json)
     }
 }
 
-pub async fn handle_post(req: Request) -> Result<Response> {
+pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> {
     let (head, body) = req.into_parts();
-    let db = head.extensions.get::<ArcDBState>().unwrap();
-    let mut conn = db.pool.get().await?;
+    let mut conn = state.db.pool.get().await?;
 
     if let Some(_auth) = head.headers.get("authorization") {
         // do something
@@ -142,10 +140,9 @@ pub async fn handle_post(req: Request) -> Result<Response> {
     create_session(&*conn, body).await
 }
 
-pub async fn handle_delete(req: Request) -> Result<Response> {
+pub async fn handle_delete(state: AppState<'_>, req: Request) -> Result<Response> {
     let (head, _) = req.into_parts();
-    let db = head.extensions.get::<ArcDBState>().unwrap();
-    let conn = db.pool.get().await?;
+    let conn = state.db.pool.get().await?;
 
     if let Some(_auth) = head.headers.get("authorization") {
         // do something

@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use crate::{http::{Request, error::Result, Response, response::{redirect_response, json_response}}, components::{html::check_if_html_headers, auth::RetrieveSession}, db::ArcDBState};
+use crate::{http::{Request, error::Result, Response, response::{redirect_response, json_response}}, components::{html::check_if_html_headers, auth::get_session}, db::ArcDBState};
 
 pub mod fs;
 pub mod auth;
@@ -11,18 +11,17 @@ pub async fn handle_get(req: Request) -> Result<Response> {
     let (mut head, _) = req.into_parts();
     let db = head.extensions.remove::<ArcDBState>().unwrap();
     let conn = db.pool.get().await?;
-    let session = RetrieveSession::get(&head.headers, &*conn).await?;
+    let session = get_session(&head.headers, &*conn).await;
 
     if check_if_html_headers(&head.headers)? {
         match session {
-            RetrieveSession::Success(_) => redirect_response("/fs/"),
-            _ => redirect_response("/auth/session")
+            Ok(_) => redirect_response("/fs/"),
+            Err(_) => redirect_response("/auth/session")
         }
     } else {
-        let rtn = json!({
-            "message": "okay"
-        });
+        session?;
 
+        let rtn = json!({"message": "okay"});
         json_response(200, &rtn)
     }
 }

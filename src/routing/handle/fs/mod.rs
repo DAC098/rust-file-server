@@ -10,10 +10,9 @@ use tokio::fs::{File as TokioFile, create_dir, remove_file, remove_dir};
 use tokio_util::codec::{FramedRead, BytesCodec};
 use hyper::{Body, Uri};
 
-use crate::components::auth::{login_redirect, RetrieveSession};
+use crate::components::auth::{login_redirect, get_session};
 use crate::components::html::{check_if_html_headers, response_index_html_parts};
 use crate::db::record::{FsItem, FsItemType, User};
-use crate::db::ArcDBState;
 use crate::db::types::PoolConn;
 use crate::http::body::{json_from_body, file_from_body};
 use crate::http::{Request, Response};
@@ -23,9 +22,8 @@ use crate::http::{
     mime,
     response,
 };
-use crate::snowflakes::IdSnowflakes;
+use crate::state::AppState;
 use crate::storage::ArcStorageState;
-use crate::components;
 
 #[derive(Serialize)]
 struct FileItem {
@@ -63,20 +61,23 @@ fn file_record_path(id: &i64, path: &str) -> String {
     }
 }
 
-pub async fn handle_get(req: Request) -> Result<Response> {
-    let (mut head, _) = req.into_parts();
-    let db = head.extensions.remove::<ArcDBState>().unwrap();
-    let conn = db.pool.get().await?;
-    let session = components::auth::RetrieveSession::get(&head.headers, &*conn).await?;
+pub async fn handle_get(state: AppState<'_>, req: Request) -> Result<Response> {
+    let (head, _) = req.into_parts();
+    let conn = state.db.pool.get().await?;
+    let user = {
+        let session_check = get_session(&head.headers, &*conn).await;
 
-    if check_if_html_headers(&head.headers)? {
-        return match session {
-            RetrieveSession::Success(_) => response_index_html_parts(head),
-            _ => login_redirect(&head.uri)
+        if check_if_html_headers(&head.headers)? {
+            return match session_check {
+                Ok(_) => response_index_html_parts(head),
+                Err(_) => login_redirect(&head.uri)
+            }
         }
-    }
 
-    let user = session.try_into_user()?;
+        let (user, _session) = session_check?;
+        user
+    };
+
     let find_path = file_record_path(&user.id, root_strip(&head.uri));
 
     if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
@@ -162,11 +163,10 @@ async fn handle_get_file_download(head: Parts, user: User, fs_item: FsItem) -> R
         ))?)
 }
 
-pub async fn handle_post(req: Request) -> Result<Response> {
+pub async fn handle_post(mut state: AppState<'_>, req: Request) -> Result<Response> {
     let (mut head, body) = req.into_parts();
-    let db = head.extensions.remove::<ArcDBState>().unwrap();
-    let mut conn = db.pool.get().await?;
-    let user = RetrieveSession::get(&head.headers, &*conn).await?.try_into_user()?;
+    let mut conn = state.db.pool.get().await?;
+    let (user, _) = get_session(&head.headers, &*conn).await?;
 
     let fs_root = root_strip(&head.uri);
     let (mut directory, mut basename) = lib::string::get_directory_and_basename(&fs_root);
@@ -272,10 +272,7 @@ pub async fn handle_post(req: Request) -> Result<Response> {
         let transaction = conn.transaction().await?;
 
         let new_fs_item = {
-            let id = {
-                let mut snowflakes = head.extensions.remove::<IdSnowflakes>().unwrap();
-                snowflakes.fs_items.next_id().await?
-            };
+            let id = state.snowflakes.fs_items.next_id().await?;
             let created = Utc::now();
             let modified = None;
             let user_data = json!({});
@@ -345,11 +342,10 @@ pub async fn handle_post(req: Request) -> Result<Response> {
     }
 }
 
-pub async fn handle_delete(req: Request) -> Result<Response> {
-    let (mut head, _) = req.into_parts();
-    let db = head.extensions.remove::<ArcDBState>().unwrap();
-    let mut conn = db.pool.get().await?;
-    let user = RetrieveSession::get(&head.headers, &*conn).await?.try_into_user()?;
+pub async fn handle_delete(state: AppState<'_>, req: Request) -> Result<Response> {
+    let (head, _) = req.into_parts();
+    let mut conn = state.db.pool.get().await?;
+    let (user, _) = get_session(&head.headers, &*conn).await?;
     let find_path = file_record_path(&user.id, root_strip(&head.uri));
 
     if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
@@ -362,8 +358,7 @@ pub async fn handle_delete(req: Request) -> Result<Response> {
             });
         }
 
-        let storage = head.extensions.remove::<ArcStorageState>().unwrap();
-        let mut fs_path = storage.directory.clone();
+        let mut fs_path = state.storage.directory.clone();
         fs_path.push(&fs_item.directory);
         fs_path.push(&fs_item.basename);
 
@@ -436,7 +431,7 @@ pub async fn handle_delete(req: Request) -> Result<Response> {
                     continue;
                 }
 
-                let mut record_path = storage.directory.clone();
+                let mut record_path = state.storage.directory.clone();
                 record_path.push(&row_directory);
                 record_path.push(&row_basename);
 
@@ -579,12 +574,10 @@ async fn handle_put_user_data_action(mut conn: PoolConn<'_>, mut fs_item: FsItem
     response::json_response(200, &rtn_json)
 }
 
-pub async fn handle_put(req: Request) -> Result<Response> {
-    let (mut head, body) = req.into_parts();
-    let storage = head.extensions.remove::<ArcStorageState>().unwrap();
-    let db = head.extensions.remove::<ArcDBState>().unwrap();
-    let conn = db.pool.get().await?;
-    let user = RetrieveSession::get(&head.headers, &*conn).await?.try_into_user()?;
+pub async fn handle_put(state: AppState<'_>,req: Request) -> Result<Response> {
+    let (head, body) = req.into_parts();
+    let conn = state.db.pool.get().await?;
+    let (user, _) = get_session(&head.headers, &*conn).await?;
     let find_path = file_record_path(&user.id, root_strip(&head.uri));
 
     if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
@@ -601,7 +594,7 @@ pub async fn handle_put(req: Request) -> Result<Response> {
         };
 
         match action.as_str() {
-            "upload" => handle_put_upload_action(storage, conn, fs_item, body).await,
+            "upload" => handle_put_upload_action(state.storage, conn, fs_item, body).await,
             "user_data" => handle_put_user_data_action(conn, fs_item, body).await,
             _ => Err(Error {
                 status: 400,

@@ -7,14 +7,14 @@ use futures::future::try_join_all;
 mod error;
 
 mod config;
+mod http;
+
 mod db;
 mod storage;
 mod template;
-mod watcher;
 mod snowflakes;
 mod security;
-
-mod http;
+mod state;
 
 mod components;
 
@@ -67,18 +67,16 @@ async fn main_runtime(conf: config::ServerConfig) -> error::Result<i32> {
     let db_conf = conf.db;
     let storage_conf = conf.storage;
     let template_conf = conf.template;
-    let watch_directory = storage_conf.directory.clone();
     let router = routing::MakeRouter {
-        db: db::DBState::new(db::build_config(db_conf)).await?,
-        storage: storage_conf.into(),
-        template: template::TemplateState::new(template::build_registry(template_conf)?),
-        snowflakes: snowflakes::IdSnowflakes::new(1)?
+        state: state::AppState {
+            db: db::DBState::new(db::build_config(db_conf)).await?,
+            storage: storage_conf.into(),
+            template: template::TemplateState::new(template::build_registry(template_conf)?),
+            snowflakes: snowflakes::IdSnowflakes::new(1)?,
+        }
     };
 
     let mut futures_list = JoinHandleList::new();
-    futures_list.push(tokio::spawn(
-        make_watcher(watch_directory)
-    ));
 
     for bind in conf.bind {
         let addr = bind.to_sockaddr();
@@ -119,7 +117,7 @@ async fn make_server(
 
     Ok(())
 }
-
+/*
 async fn make_watcher(directory: PathBuf) -> error::Result<()> {
     println!("starting watcher");
 
@@ -129,3 +127,4 @@ async fn make_watcher(directory: PathBuf) -> error::Result<()> {
 
     Ok(())
 }
+*/

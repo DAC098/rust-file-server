@@ -7,12 +7,9 @@ use hyper::server::conn::AddrStream;
 use hyper::{Request, Response, Body, Error, Method};
 use hyper::service::Service;
 
-use crate::db::ArcDBState;
 use crate::http::header::copy_header_value;
 use crate::http::response::okay_response;
-use crate::snowflakes::IdSnowflakes;
-use crate::storage::ArcStorageState;
-use crate::template::ArcTemplateState;
+use crate::state::AppState;
 use crate::http::error::{
     Error as ResponseError,
     Result as ResponseResult
@@ -32,15 +29,12 @@ fn method_not_allowed() -> ResponseError {
 
 pub struct Router<'a> {
     connection: String,
-    db: ArcDBState,
-    storage: ArcStorageState,
-    template: ArcTemplateState<'a>,
-    snowflakes: IdSnowflakes,
+    state: AppState<'a>
 }
 
 impl<'a> Router<'a> {
 
-    async fn handle_route(req: Request<Body>) -> ResponseResult<Response<Body>> {
+    async fn handle_route(state: AppState<'_>, req: Request<Body>) -> ResponseResult<Response<Body>> {
         let url = req.uri();
         let path = url.path();
         let method = req.method();
@@ -53,14 +47,14 @@ impl<'a> Router<'a> {
         } else if path.starts_with("/auth/") {
             if path == "/auth/session" {
                 return match *method {
-                    Method::GET => handle::auth::session::handle_get(req).await,
-                    Method::POST => handle::auth::session::handle_post(req).await,
-                    Method::DELETE => handle::auth::session::handle_delete(req).await,
+                    Method::GET => handle::auth::session::handle_get(state, req).await,
+                    Method::POST => handle::auth::session::handle_post(state, req).await,
+                    Method::DELETE => handle::auth::session::handle_delete(state, req).await,
                     _ => Err(method_not_allowed())
                 }
             } else if path == "/auth/password" {
                 return match *method {
-                    Method::POST => handle::auth::password::handle_post(req).await,
+                    Method::POST => handle::auth::password::handle_post(state, req).await,
                     _ => Err(method_not_allowed())
                 }
             }
@@ -68,7 +62,7 @@ impl<'a> Router<'a> {
             if path == "/admin/users" {
                 return match *method {
                     Method::GET => okay_response(req),
-                    Method::POST => handle::admin::users::handle_post(req).await,
+                    Method::POST => handle::admin::users::handle_post(state, req).await,
                     Method::DELETE => okay_response(req),
                     _ => Err(method_not_allowed())
                 }
@@ -82,15 +76,15 @@ impl<'a> Router<'a> {
             }
         } else if path.starts_with("/fs/") {
             return match *method {
-                Method::GET => handle::fs::handle_get(req).await,
-                Method::POST => handle::fs::handle_post(req).await,
-                Method::PUT => handle::fs::handle_put(req).await,
-                Method::DELETE => handle::fs::handle_delete(req).await,
+                Method::GET => handle::fs::handle_get(state, req).await,
+                Method::POST => handle::fs::handle_post(state, req).await,
+                Method::PUT => handle::fs::handle_put(state, req).await,
+                Method::DELETE => handle::fs::handle_delete(state, req).await,
                 _ => Err(method_not_allowed())
             }
         }
 
-        handle::_static_::handle_req(req).await
+        handle::_static_::handle_req(state, req).await
     }
 
     fn handle_error(error: ResponseError) -> ResponseResult<Response<Body>> {
@@ -124,13 +118,9 @@ impl Service<Request<Body>> for Router<'static> {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, mut req: Request<Body>) -> Self::Future {
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
         let connection = self.connection.clone();
-        let extensions_ref = req.extensions_mut();
-        extensions_ref.insert(self.db.clone());
-        extensions_ref.insert(self.storage.clone());
-        extensions_ref.insert(self.template.clone());
-        extensions_ref.insert(self.snowflakes.clone());
+        let state = self.state.clone();
 
         Box::pin(async move {
             let remote_addr = copy_header_value(req.headers(), "x-forwarded-for");
@@ -149,7 +139,7 @@ impl Service<Request<Body>> for Router<'static> {
 
             let start = std::time::Instant::now();
 
-            let rtn = match Self::handle_route(req).await {
+            let rtn = match Self::handle_route(state, req).await {
                 Ok(res) => Ok(res),
                 Err(error) => {
                     match Self::handle_error(error) {
@@ -224,10 +214,7 @@ impl Service<Request<Body>> for Router<'static> {
 
 #[derive(Clone)]
 pub struct MakeRouter<'a> {
-    pub db: ArcDBState,
-    pub storage: ArcStorageState,
-    pub template: ArcTemplateState<'a>,
-    pub snowflakes: IdSnowflakes,
+    pub state: AppState<'a>
 }
 
 // so for how this works. the service works in two steps. the first service 
@@ -249,10 +236,7 @@ impl<'t> Service<&'t AddrStream> for MakeRouter<'static> {
 
         let router = Router {
             connection: remote_addr.to_string(),
-            db: self.db.clone(),
-            storage: self.storage.clone(),
-            template: self.template.clone(),
-            snowflakes: self.snowflakes.clone(),
+            state: self.state.clone()
         };
 
         Box::pin(async move {

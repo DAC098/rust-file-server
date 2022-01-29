@@ -4,18 +4,17 @@ use hyper::{Method, Body};
 use tokio::fs::File as TokioFile;
 use tokio_util::codec::{FramedRead, BytesCodec};
 
-use crate::{http::{Request, Response, error::Result, error::Error, response, mime::mime_type_from_ext}, storage::ArcStorageState};
+use crate::{http::{Request, Response, error::Result, error::Error, response, mime::mime_type_from_ext}, state::AppState};
 
-pub async fn handle_req(req: Request) -> Result<Response> {
-    let (mut head, _) = req.into_parts();
+pub async fn handle_req(state: AppState<'_>, req: Request) -> Result<Response> {
+    let (head, _) = req.into_parts();
     let lookup = head.uri.path().to_owned();
-    let storage = head.extensions.remove::<ArcStorageState>().unwrap();
     let mut to_send: Option<PathBuf> = None;
 
-    if let Some(file_path) = storage.static_resources.files.get(&lookup) {
+    if let Some(file_path) = state.storage.static_resources.files.get(&lookup) {
         to_send = Some(file_path.clone())
     } else {
-        for (key, path) in storage.static_resources.directories.iter() {
+        for (key, path) in state.storage.static_resources.directories.iter() {
             if lookup.starts_with(key.as_str()) {
                 let stripped = lookup.strip_prefix(key.as_str()).unwrap();
                 let mut sanitized = String::with_capacity(stripped.len());

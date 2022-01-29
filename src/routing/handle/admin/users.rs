@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::fs::create_dir;
 
-use crate::{http::{Request, Response, error::{Result, Error}, response::json_response, body::json_from_body}, db::{ArcDBState, record::{User, FsItemType}}, components::auth::RetrieveSession, snowflakes::IdSnowflakes, security::argon::hash_with_default, storage::ArcStorageState};
+use crate::{http::{Request, Response, error::{Result, Error}, response::json_response, body::json_from_body}, db::record::{User, FsItemType}, components::auth::get_session, security::argon::hash_with_default, state::AppState};
 
 #[derive(Deserialize)]
 struct NewUserJson {
@@ -11,11 +11,10 @@ struct NewUserJson {
     email: Option<String>
 }
 
-pub async fn handle_post(req: Request) -> Result<Response> {
-    let (mut head, body) = req.into_parts();
-    let db = head.extensions.remove::<ArcDBState>().unwrap();
-    let mut conn = db.pool.get().await?;
-    let session = RetrieveSession::get(&head.headers, &*conn).await?;
+pub async fn handle_post(mut app: AppState<'_>, req: Request) -> Result<Response> {
+    let (head, body) = req.into_parts();
+    let mut conn = app.db.pool.get().await?;
+    let (user, session) = get_session(&head.headers, &*conn).await?;
     let new_user: NewUserJson = json_from_body(body).await?;
 
     let existing = User::find_username_or_optional_email(&*conn, &new_user.username, &new_user.email).await?;
@@ -40,10 +39,9 @@ pub async fn handle_post(req: Request) -> Result<Response> {
         }
     }
 
-    let mut snowflakes = head.extensions.remove::<IdSnowflakes>().unwrap();
     let transaction = conn.transaction().await?;
     let user = {
-        let id = snowflakes.users.next_id().await?;
+        let id = app.snowflakes.users.next_id().await?;
         let hash = hash_with_default(&new_user.password)?;
         let email_verified = false;
 
@@ -63,7 +61,7 @@ pub async fn handle_post(req: Request) -> Result<Response> {
     };
 
     {
-        let id = snowflakes.fs_items.next_id().await?;
+        let id = app.snowflakes.fs_items.next_id().await?;
         let item_type: i16 = FsItemType::Dir.into();
         let parent = None::<i64>;
         let directory = "".to_owned();
@@ -81,8 +79,7 @@ pub async fn handle_post(req: Request) -> Result<Response> {
     }
 
     {
-        let storage = head.extensions.remove::<ArcStorageState>().unwrap();
-        let mut root_path = storage.directory.clone();
+        let mut root_path = app.storage.directory.clone();
         root_path.push(user.id.to_string());
 
         create_dir(root_path).await?;
@@ -90,5 +87,6 @@ pub async fn handle_post(req: Request) -> Result<Response> {
 
     transaction.commit().await?;
 
-    json_response(200, &user)
+    let json = json!({"message":"successful","payload": user});
+    json_response(200, &json)
 }
