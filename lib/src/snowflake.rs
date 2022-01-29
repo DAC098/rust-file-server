@@ -77,7 +77,7 @@ impl TokioSnowflake {
         })
     }
 
-    pub async fn next_id(&mut self) -> Result<i64> {
+    pub async fn next_id(&self) -> Result<i64> {
         let now = current_timestamp() - self.start_time;
         let mut seq_value: i64 = 1;
 
