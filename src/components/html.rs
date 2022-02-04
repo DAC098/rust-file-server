@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use hyper::{HeaderMap, http::request::Parts};
+use hyper::HeaderMap;
 use serde_json::json;
 
 use crate::{http::{error::{Result, Error}, Response, response::build}, template::ArcTemplateState};
@@ -26,8 +26,7 @@ pub fn check_if_html_headers(headers: &HeaderMap) -> Result<bool> {
     Ok(false)
 }
 
-pub fn response_index_html_parts(mut parts: Parts) -> Result<Response> {
-    let template = parts.extensions.remove::<ArcTemplateState>().unwrap();
+pub fn response_index_html_parts(template: ArcTemplateState) -> Result<Response> {
     let template_data = json!({});
     let render = template.render("page/index", &template_data)?;
 

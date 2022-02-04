@@ -106,6 +106,21 @@ impl TokioSnowflake {
             (self.machine_id << SNOWFLAKE_SEQUENCE_ID_BITS) |
             seq_value)
     }
+
+    pub async fn await_next_id(&self) -> Result<i64> {
+        match self.next_id().await {
+            Ok(id) => Ok(id),
+            Err(err) => {
+                match err {
+                    Error::SequenceMaxReached => {
+                        // wait here
+                        self.next_id().await
+                    },
+                    _ => Err(err)
+                }
+            }
+        }
+    }
 }
 
 #[inline]

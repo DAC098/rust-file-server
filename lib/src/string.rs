@@ -12,7 +12,7 @@ pub fn name_from_pathbuf(path: &PathBuf) -> Option<String> {
     }
 }
 
-pub fn get_directory_and_basename<T>(path: T) -> (String, String)
+pub fn get_directory_and_basename<T>(path: T, mut no_leading: bool) -> (String, String)
 where
     T: AsRef<str>
 {
@@ -21,7 +21,12 @@ where
 
     for ch in path.as_ref().chars() {
         if ch == '/' {
-            directory.push('/');
+            if no_leading {
+                no_leading = false;
+            } else {
+                directory.push('/');
+            }
+
             directory.push_str(working.as_str());
             working.clear();
         } else {

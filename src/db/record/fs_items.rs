@@ -48,10 +48,12 @@ pub struct FsItem {
     pub users_id: i64,
     pub directory: String,
     pub basename: String,
+    pub item_size: i64,
     #[serde(with = "ts_seconds")]
     pub created: DateTime<Utc>,
     #[serde(with = "ts_seconds_option")]
     pub modified: Option<DateTime<Utc>>,
+    pub item_exists: bool,
     pub user_data: Value,
     pub is_root: bool
 }
@@ -60,7 +62,7 @@ pub struct FsItem {
 
 impl FsItem {
 
-    async fn find_user_id_directory_basename(
+    pub async fn find_user_id_directory_basename(
         conn: &impl GenericClient, 
         users_id: &i64,
         directory: &String,
@@ -71,8 +73,10 @@ impl FsItem {
             select id, \
                    item_type, \
                    parent, \
+                   item_size, \
                    created, \
                    modified, \
+                   item_exists, \
                    user_data, \
                    is_root \
             from fs_items \
@@ -88,10 +92,12 @@ impl FsItem {
                 users_id: users_id.clone(),
                 directory: directory.clone(),
                 basename: basename.clone(),
-                created: record.get(3),
-                modified: record.get(4),
-                user_data: record.get(5),
-                is_root: record.get(6),
+                item_size: record.get(3),
+                created: record.get(4),
+                modified: record.get(5),
+                item_exists: record.get(6),
+                user_data: record.get(7),
+                is_root: record.get(8),
             }))
         } else {
             Ok(None)
@@ -99,9 +105,7 @@ impl FsItem {
     }
 
     pub async fn find_path(conn: &impl GenericClient, users_id: &i64, path: &String) -> Result<Option<Self>> {
-        println!("FsItem::find_path users_id: {} path: \"{}\"", users_id, path);
-
-        let (directory, basename) = lib::string::get_directory_and_basename(path.as_str());
+        let (directory, basename) = lib::string::get_directory_and_basename(&path, true);
 
         FsItem::find_user_id_directory_basename(conn, users_id, &directory, &basename).await
     }
@@ -112,9 +116,11 @@ impl FsItem {
             select id, \
                    item_type, \
                    users_id, \
+                   item_size, \
                    directory, \
                    created, \
                    modified, \
+                   item_exists, \
                    user_data, \
                    is_root \
             from fs_items \
@@ -127,12 +133,14 @@ impl FsItem {
                 item_type: record.get::<usize, i16>(1).into(),
                 parent: Some(parent.clone()),
                 users_id: record.get(2),
-                directory: record.get(3),
+                item_size: record.get(3),
+                directory: record.get(4),
                 basename: basename.clone(),
                 created: record.get(4),
                 modified: record.get(5),
-                user_data: record.get(6),
-                is_root: record.get(7),
+                item_exists: record.get(6),
+                user_data: record.get(7),
+                is_root: record.get(8),
             }))
         } else {
             Ok(None)
@@ -152,8 +160,10 @@ impl FsItem {
                    users_id, \
                    directory, \
                    basename, \
+                   item_size, \
                    created, \
                    modified, \
+                   item_exists, \
                    user_data, \
                    is_root \
             from fs_items \
@@ -169,11 +179,21 @@ impl FsItem {
             users_id: row.get(3),
             directory: row.get(4),
             basename: row.get(5),
-            created: row.get(6),
-            modified: row.get(7),
-            user_data: row.get(8),
-            is_root: row.get(9),
+            item_size: row.get(6),
+            created: row.get(7),
+            modified: row.get(8),
+            item_exists: row.get(9),
+            user_data: row.get(10),
+            is_root: row.get(11),
         })
         .collect())
+    }
+
+    pub async fn update_item_exists(conn: &impl GenericClient, id: &i64, exists: bool) -> Result<()> {
+        conn.execute(
+            "update fs_items set item_exists = $2 where id = $1",
+            &[id, &exists]
+        ).await?;
+        Ok(())
     }
 }

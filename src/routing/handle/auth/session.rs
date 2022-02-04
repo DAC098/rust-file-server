@@ -85,7 +85,7 @@ pub async fn handle_get(state: AppState<'_>,req: Request) -> Result<Response> {
     if check_if_html_headers(&head.headers)? {
         match session_check {
             Ok(_) => redirect_response("/fs/"),
-            Err(_) => response_index_html_parts(head)
+            Err(_) => response_index_html_parts(state.template)
         }
     } else {
         session_check?;

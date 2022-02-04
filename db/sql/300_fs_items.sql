@@ -7,8 +7,12 @@ create table fs_items (
     directory varchar not null,
     basename varchar not null,
 
+    item_size bigint default 0,
+
     created timestamp with time zone not null,
     modified timestamp with time zone,
+
+    item_exists boolean default true,
 
     user_data json not null,
 

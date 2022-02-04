@@ -11,10 +11,10 @@ struct NewUserJson {
     email: Option<String>
 }
 
-pub async fn handle_post(mut app: AppState<'_>, req: Request) -> Result<Response> {
+pub async fn handle_post(app: AppState<'_>, req: Request) -> Result<Response> {
     let (head, body) = req.into_parts();
     let mut conn = app.db.pool.get().await?;
-    let (user, session) = get_session(&head.headers, &*conn).await?;
+    let (_user, _session) = get_session(&head.headers, &*conn).await?;
     let new_user: NewUserJson = json_from_body(body).await?;
 
     let existing = User::find_username_or_optional_email(&*conn, &new_user.username, &new_user.email).await?;

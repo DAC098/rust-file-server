@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::pin::Pin;
 use std::future::Future;
 use std::task::{Context, Poll};
@@ -6,6 +7,7 @@ use lib::time::format_duration;
 use hyper::server::conn::AddrStream;
 use hyper::{Request, Response, Body, Error, Method};
 use hyper::service::Service;
+use serde_json::json;
 
 use crate::http::header::copy_header_value;
 use crate::http::response::okay_response;
@@ -82,21 +84,34 @@ impl<'a> Router<'a> {
                 Method::DELETE => handle::fs::handle_delete(state, req).await,
                 _ => Err(method_not_allowed())
             }
+        } else if path.starts_with("/sync/") {
+            return match *method {
+                Method::PUT => handle::sync::handle_put(state, req).await,
+                _ => Err(method_not_allowed())
+            }
         }
 
         handle::_static_::handle_req(state, req).await
     }
 
     fn handle_error(error: ResponseError) -> ResponseResult<Response<Body>> {
+        let mut msg = String::new();
+        msg.push_str("error during response: ");
+        msg.write_fmt(format_args!("{}", error))?;
+
         if let Some(source) = error.source {
-            println!("error during response: {}", source);
+            msg.write_fmt(format_args!("\n    source: {}", source))?;
         }
+
+        println!("{}", msg);
+
+        let json = json!({"error": error.name, "message": error.msg});
 
         // this probably needs to be handled better
         Response::builder()
             .status(error.status)
             .header("content-type", "application/json")
-            .body(format!("{{\"error\":\"{}\",\"message\":\"{}\"}}", error.name, error.msg).into())
+            .body(serde_json::to_string(&json)?.into())
             .map_err(|err| err.into())
     }
 

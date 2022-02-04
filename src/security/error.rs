@@ -1,7 +1,8 @@
+use crate::http::error::Error as HttpError;
+
 #[derive(Debug)]
 pub enum Error {
     General,
-    InvalidPassword,
     TimestampOverflow,
     Argon2Error(argon2::Error)
 }
@@ -23,7 +24,6 @@ impl std::fmt::Display for Error {
             Error::General => write!(f, "security error"),
             Error::TimestampOverflow => write!(f, "timestamp overflow"),
             Error::Argon2Error(err) => write!(f, "Argon2 error: {}", err),
-            _ => write!(f, "unhandled error")
         }
     }
 }
@@ -31,5 +31,11 @@ impl std::fmt::Display for Error {
 impl From<argon2::Error> for Error {
     fn from(error: argon2::Error) -> Self {
         Error::Argon2Error(error)
+    }
+}
+
+impl From<Error> for HttpError {
+    fn from(error: Error) -> Self {
+        HttpError::internal_server_error(Some(error))
     }
 }

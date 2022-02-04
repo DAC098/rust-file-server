@@ -34,8 +34,6 @@ fn main() {
 }
 
 fn main_entry() -> error::Result<i32> {
-    std::env::set_var("RUST_BACKTRACE", "1");
-
     let mut config_files: Vec<PathBuf> = Vec::new();
     let mut args = std::env::args();
     args.next();

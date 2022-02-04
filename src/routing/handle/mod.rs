@@ -3,6 +3,7 @@ use serde_json::json;
 use crate::{http::{Request, error::Result, Response, response::{redirect_response, json_response}}, components::{html::check_if_html_headers, auth::get_session}, db::ArcDBState};
 
 pub mod fs;
+pub mod sync;
 pub mod auth;
 pub mod admin;
 pub mod _static_;

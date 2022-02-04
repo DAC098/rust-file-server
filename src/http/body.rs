@@ -67,19 +67,22 @@ where
     rtn
 }
 
-pub async fn file_from_body<T>(path: T, open: bool, mut body: Body) -> Result<File>
+pub async fn file_from_body<T>(path: T, open: bool, mut body: Body) -> Result<(File, usize)>
 where
     T: AsRef<Path> 
 {
-    let mut options = OpenOptions::new();
-    options.write(true);
-    options.create(!open);
-    let mut file = options.open(path).await?;
+    let mut written = 0;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(!open)
+        .open(path)
+        .await?;
 
     while let Some(chunk) = body.next().await {
         let bytes = chunk?;
         file.write(&bytes).await?;
+        written += bytes.len();
     }
 
-    Ok(file)
+    Ok((file, written))
 }

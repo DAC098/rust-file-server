@@ -3,7 +3,6 @@ use std::io::ErrorKind;
 
 use chrono::Utc;
 use futures::{pin_mut, TryStreamExt};
-use hyper::http::request::Parts;
 use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
 use tokio::fs::{File as TokioFile, create_dir, remove_file, remove_dir};
@@ -15,6 +14,7 @@ use crate::components::html::{check_if_html_headers, response_index_html_parts};
 use crate::db::record::{FsItem, FsItemType, User};
 use crate::db::types::PoolConn;
 use crate::http::body::{json_from_body, file_from_body};
+use crate::http::uri::QueryMap;
 use crate::http::{Request, Response};
 use crate::http::{
     error::{Error, Result},
@@ -61,6 +61,90 @@ fn file_record_path(id: &i64, path: &str) -> String {
     }
 }
 
+async fn handle_get_info(_state: &AppState<'_>, conn: &PoolConn<'_>, _query_map: QueryMap, user: User, fs_item: FsItem) -> Result<Response> {
+    match fs_item.item_type {
+        FsItemType::File => {
+            let json = json!({
+                "message": "successful",
+                "payload": fs_item
+            });
+        
+            response::json_response(200, &json)
+        },
+        FsItemType::Dir => {
+            let dir_items = FsItem::find_dir_contents(
+                &**conn, 
+                &user.id, 
+                &Some(fs_item.id)
+            ).await?;
+            let mut fs_item_json = serde_json::to_value(fs_item)?;
+            fs_item_json.as_object_mut().unwrap().insert(
+                "contents".into(), 
+                serde_json::to_value(dir_items)?
+            );
+
+            let json = json!({
+                "message": "successful",
+                "payload": fs_item_json
+            });
+
+            response::json_response(200, &json)
+        },
+        FsItemType::Unknown => {
+            Err(Error {
+                status: 400,
+                name: "UnknownFSType".to_owned(),
+                msg: "cannot handle requested file system item".to_owned(),
+                source: None
+            })
+        }
+    }
+}
+
+async fn handle_get_download(state: &AppState<'_>, conn: &PoolConn<'_>, query_map: QueryMap, user: User, fs_item: FsItem) -> Result<Response> {
+    let mut path = state.storage.directory.clone();
+    path.push(&fs_item.directory);
+    path.push(&fs_item.basename);
+
+    if !path.exists() {
+        if fs_item.item_exists {
+            FsItem::update_item_exists(&**conn, &fs_item.id, false).await?;
+        }
+    } else {
+        if !fs_item.item_exists {
+            FsItem::update_item_exists(&**conn, &fs_item.id, true).await?;
+        }
+    }
+
+    match fs_item.item_type {
+        FsItemType::File => {
+            let mime = mime::mime_type_from_ext(path.extension());
+            let mut res = response::build()
+                .status(200)
+                .header("content-type", mime.to_string());
+
+            if query_map.has_key("attachment") {
+                res = res.header("content-disposition", format!("attachment; filename=\"{}\"", fs_item.basename));
+            }
+
+            Ok(res.body(Body::wrap_stream(
+                FramedRead::new(TokioFile::open(path).await?, BytesCodec::new())
+            ))?)
+        },
+        FsItemType::Dir => {
+            response::okay_text_response()
+        },
+        FsItemType::Unknown => {
+            Err(Error {
+                status: 400,
+                name: "UnknownFSType".to_owned(),
+                msg: "cannot handle requested file system item".to_owned(),
+                source: None
+            })
+        }
+    }
+}
+
 pub async fn handle_get(state: AppState<'_>, req: Request) -> Result<Response> {
     let (head, _) = req.into_parts();
     let conn = state.db.pool.get().await?;
@@ -69,7 +153,7 @@ pub async fn handle_get(state: AppState<'_>, req: Request) -> Result<Response> {
 
         if check_if_html_headers(&head.headers)? {
             return match session_check {
-                Ok(_) => response_index_html_parts(head),
+                Ok(_) => response_index_html_parts(state.template),
                 Err(_) => login_redirect(&head.uri)
             }
         }
@@ -82,45 +166,30 @@ pub async fn handle_get(state: AppState<'_>, req: Request) -> Result<Response> {
 
     if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
         let query_map = uri::QueryMap::new(&head.uri);
-        let wants_download = query_map.has_key("download");
+        let mut action = "info";
 
-        match fs_item.item_type {
-            FsItemType::File => {
-                if wants_download {
-                    handle_get_file_download(head, user, fs_item).await
-                } else {
-                    let json = json!({
-                        "message": "successful",
-                        "payload": fs_item
-                    });
-                
-                    response::json_response(200, &json)
-                }
-            },
-            FsItemType::Dir => {
-                if wants_download {
-                    handle_get_dir_download(head, fs_item).await
-                } else {
-                    let dir_items = FsItem::find_dir_contents(&*conn, &user.id, &Some(fs_item.id)).await?;
-                    let json = json!({
-                        "message": "successful",
-                        "payload": {
-                            "directory": fs_item,
-                            "contents": dir_items
-                        }
-                    });
-
-                    response::json_response(200, &json)
-                }
-            },
-            FsItemType::Unknown => {
-                Err(Error {
+        if let Some(value) = query_map.get_value("action") {
+            if let Some(value) = value {
+                action = value.as_str();
+            } else {
+                return Err(Error {
                     status: 400,
-                    name: "UnknownFSType".to_owned(),
-                    msg: "cannot handle requested file system item".to_owned(),
+                    name: "NoActionValueSpecified".into(),
+                    msg: "the action query was specified but no value was given".into(),
                     source: None
                 })
             }
+        }
+
+        match action {
+            "info" => handle_get_info(&state, &conn, query_map, user, fs_item).await,
+            "download" => handle_get_download(&state, &conn, query_map, user, fs_item).await,
+            _ => Err(Error {
+                status: 400,
+                name: "UnknownActionGiven".into(),
+                msg: "the requested action is unknown".into(),
+                source: None
+            })
         }
     } else {
         Err(Error {
@@ -132,44 +201,13 @@ pub async fn handle_get(state: AppState<'_>, req: Request) -> Result<Response> {
     }
 }
 
-async fn handle_get_dir_download(head: Parts, _fs_item: FsItem) -> Result<Response> {
-    let storage = head.extensions.get::<ArcStorageState>().unwrap();
-    let tmp_file_name_opt =  storage.get_tmp_file("tar");
-
-    if tmp_file_name_opt.is_none() {
-        return Err(Error::internal_server_error_no_error());
-    }
-
-    let tmp_file_name = tmp_file_name_opt.unwrap();
-    let _tmp_file = TokioFile::create(&tmp_file_name).await?;
-
-    response::okay_text_response()
-}
-
-async fn handle_get_file_download(head: Parts, user: User, fs_item: FsItem) -> Result<Response> {
-    let storage = head.extensions.get::<ArcStorageState>().unwrap();
-    let mut path = storage.directory.clone();
-    path.push(&fs_item.directory);
-    path.push(&fs_item.basename);
-
-    let mime = mime::mime_type_from_ext(path.extension());
-
-    Ok(response::build()
-        .status(200)
-        .header("content-type", mime.to_string())
-        .header("content-disposition", format!("attachment; filename=\"{}\"", fs_item.basename))
-        .body(Body::wrap_stream(
-            FramedRead::new(TokioFile::open(path).await?, BytesCodec::new())
-        ))?)
-}
-
-pub async fn handle_post(mut state: AppState<'_>, req: Request) -> Result<Response> {
-    let (mut head, body) = req.into_parts();
+pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> {
+    let (head, body) = req.into_parts();
     let mut conn = state.db.pool.get().await?;
     let (user, _) = get_session(&head.headers, &*conn).await?;
 
     let fs_root = root_strip(&head.uri);
-    let (mut directory, mut basename) = lib::string::get_directory_and_basename(&fs_root);
+    let (mut directory, mut basename) = lib::string::get_directory_and_basename(&fs_root, false);
     basename = basename.trim().to_owned();
 
     if basename.is_empty() {
@@ -187,13 +225,13 @@ pub async fn handle_post(mut state: AppState<'_>, req: Request) -> Result<Respon
         let mut post_type = "file";
         let mut override_existing = false;
         let post_path = {
-            let storage = head.extensions.remove::<ArcStorageState>().unwrap();
-            let mut rtn = storage.directory.clone();
+            let mut rtn = state.storage.directory.clone();
 
             if !fs_parent.is_root {
-                rtn.push(&directory);
+                rtn.push(&fs_parent.directory);
             }
 
+            rtn.push(&fs_parent.basename);
             rtn.push(&basename);
             rtn
         };
@@ -271,18 +309,17 @@ pub async fn handle_post(mut state: AppState<'_>, req: Request) -> Result<Respon
 
         let transaction = conn.transaction().await?;
 
-        let new_fs_item = {
+        let mut new_fs_item = {
             let id = state.snowflakes.fs_items.next_id().await?;
             let created = Utc::now();
             let modified = None;
-            let user_data = json!({});
             let parent_id = Some(fs_parent.id);
             let fs_type_ref: i16 = fs_type.clone().into();
 
             transaction.execute(
                 "\
-                insert into fs_items (id, item_type, parent, users_id, directory, basename, created, user_data) values \
-                ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                insert into fs_items (id, item_type, parent, users_id, directory, basename, created) values \
+                ($1, $2, $3, $4, $5, $6, $7)",
                 &[
                     &id,
                     &fs_type_ref,
@@ -290,8 +327,7 @@ pub async fn handle_post(mut state: AppState<'_>, req: Request) -> Result<Respon
                     &user.id, 
                     &directory, 
                     &basename, 
-                    &created, 
-                    &user_data,
+                    &created
                 ]
             ).await?;
 
@@ -302,26 +338,32 @@ pub async fn handle_post(mut state: AppState<'_>, req: Request) -> Result<Respon
                 users_id: user.id,
                 directory,
                 basename,
+                item_size: 0,
                 created,
                 modified,
-                user_data,
+                item_exists: true,
+                user_data: json!({}),
                 is_root: false
             }
         };
 
+        new_fs_item.item_size = match &new_fs_item.item_type {
+            FsItemType::File => {
+                let (_, size) = file_from_body(&post_path, false, body).await?;
+                size as i64
+            },
+            FsItemType::Dir => {
+                create_dir(&post_path).await?;
+                0
+            },
+            _ => {0}
+        };
+
         {
-            let modified = Some(new_fs_item.created.clone());
-
             transaction.execute(
-                "update fs_items set modified = $2 where id = $1", 
-                &[&fs_parent.id, &modified]
+                "update fs_items set item_size = $2 where id = $1",
+                &[&new_fs_item.id, &new_fs_item.item_size]
             ).await?;
-        }
-
-        match &new_fs_item.item_type {
-            FsItemType::File => {file_from_body(&post_path, false, body).await?;},
-            FsItemType::Dir => {create_dir(&post_path).await?;},
-            _ => {}
         }
 
         transaction.commit().await?;
@@ -526,14 +568,6 @@ async fn handle_put_upload_action(storage: ArcStorageState, mut conn: PoolConn<'
         });
     }
 
-    let transaction = conn.transaction().await?;
-    let modified = Utc::now();
-
-    transaction.execute(
-        "update fs_item set modified = $2 where $1",
-        &[&fs_item.id, &modified]
-    ).await?;
-
     let file_path = {
         let mut path = storage.directory.clone();
         path.push(&fs_item.directory);
@@ -541,11 +575,27 @@ async fn handle_put_upload_action(storage: ArcStorageState, mut conn: PoolConn<'
         path
     };
 
-    file_from_body(&file_path, true, body).await?;
+    let (_, size) = file_from_body(&file_path, true, body).await?;
 
-    transaction.commit().await?;
+    {
+        let transaction = conn.transaction().await?;
+        let item_size = size as i64;
+        let modified = Utc::now();
 
-    fs_item.modified = Some(modified);
+        transaction.execute(
+            "\
+            update fs_item \
+            set modified = $2, \
+                item_size = $3, \
+                item_exists = true \
+            where $1",
+            &[&fs_item.id, &modified, &item_size]
+        ).await?;
+
+        transaction.commit().await?;
+
+        fs_item.modified = Some(modified);
+    }
 
     let rtn_json = json!({
         "message": "successful",
@@ -594,7 +644,18 @@ pub async fn handle_put(state: AppState<'_>,req: Request) -> Result<Response> {
         };
 
         match action.as_str() {
-            "upload" => handle_put_upload_action(state.storage, conn, fs_item, body).await,
+            "upload" => {
+                if fs_item.item_type == FsItemType::Dir {
+                    Err(Error {
+                        status: 400,
+                        name: "InvalidAction".into(),
+                        msg: "cannot upload a file as a directory".into(),
+                        source: None
+                    })
+                } else {
+                    handle_put_upload_action(state.storage, conn, fs_item, body).await
+                }
+            },
             "user_data" => handle_put_user_data_action(conn, fs_item, body).await,
             _ => Err(Error {
                 status: 400,

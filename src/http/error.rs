@@ -4,8 +4,6 @@ use std::borrow::Borrow;
 
 use lib;
 
-use crate::security;
-
 #[derive(Debug)]
 pub struct Error {
     pub status: u16,
@@ -41,15 +39,6 @@ impl Error {
             name: "InternalServerError".to_owned(),
             msg: "server error when responding to request".to_owned(),
             source: Self::option_box_error(prev)
-        }
-    }
-
-    pub fn internal_server_error_no_error() -> Error {
-        Error {
-            status: 500,
-            name: "InternalServerError".to_owned(),
-            msg: "server error when responding to request".to_owned(),
-            source: None
         }
     }
 }
@@ -144,12 +133,6 @@ impl From<lib::snowflake::Error> for Error {
 
 impl From<argon2::Error> for Error {
     fn from(error: argon2::Error) -> Self {
-        Self::internal_server_error(Some(error))
-    }
-}
-
-impl From<security::error::Error> for Error {
-    fn from(error: security::error::Error) -> Self {
         Self::internal_server_error(Some(error))
     }
 }
