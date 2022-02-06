@@ -1,6 +1,8 @@
+use chrono::Utc;
 use hyper::Body;
 use hyper::{Response as HyperResponse, http::response::Builder};
 use serde::Serialize;
+use serde_json::json;
 
 use crate::http::error;
 use super::types::{Response, Request};
@@ -35,6 +37,34 @@ where
         .status(status)
         .header("content-type", "application/json")
         .body(serde_json::to_string(data)?.into())?)
+}
+
+pub fn json_okay_response(status: u16) -> error::Result<Response> {
+    let json = json!({
+        "message": "successful",
+        "timestamp": Utc::now().timestamp()
+    });
+
+    Ok(build()
+        .status(status)
+        .header("content-type", "application/json")
+        .body(serde_json::to_string(&json)?.into())?)
+}
+
+pub fn json_payload_response<T>(status: u16, data: T) -> error::Result<Response>
+where
+    T: Serialize
+{
+    let json = json!({
+        "message": "successful",
+        "timestamp": Utc::now().timestamp(),
+        "payload": data
+    });
+
+    Ok(build()
+        .status(status)
+        .header("content-type", "application/json")
+        .body(serde_json::to_string(&json)?.into())?)
 }
 
 pub fn okay_response(req: Request) -> error::Result<Response> {

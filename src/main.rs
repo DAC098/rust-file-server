@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use hyper::Server;
 use futures::future::try_join_all;
+use log::{log_enabled, Level};
 
 mod error;
 
@@ -49,9 +50,19 @@ fn main_entry() -> error::Result<i32> {
         );
     }
 
+    env_logger::init();
+
     let conf = config::load_server_config(config_files)?;
 
-    println!("{:#?}", conf);
+    if log_enabled!(Level::Debug) {
+        log::debug!("env vars");
+
+        for (key, value) in std::env::vars() {
+            log::debug!("{} {}", key, value);
+        }
+    }
+
+    log::debug!("{:#?}", conf);
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_io()

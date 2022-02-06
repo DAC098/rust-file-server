@@ -58,8 +58,6 @@ pub struct FsItem {
     pub is_root: bool
 }
 
-
-
 impl FsItem {
 
     pub async fn find_user_id_directory_basename(
@@ -136,11 +134,11 @@ impl FsItem {
                 item_size: record.get(3),
                 directory: record.get(4),
                 basename: basename.clone(),
-                created: record.get(4),
-                modified: record.get(5),
-                item_exists: record.get(6),
-                user_data: record.get(7),
-                is_root: record.get(8),
+                created: record.get(5),
+                modified: record.get(6),
+                item_exists: record.get(7),
+                user_data: record.get(8),
+                is_root: record.get(9),
             }))
         } else {
             Ok(None)
@@ -194,6 +192,46 @@ impl FsItem {
             "update fs_items set item_exists = $2 where id = $1",
             &[id, &exists]
         ).await?;
+
+        Ok(())
+    }
+
+    pub async fn create(&self, conn: &impl GenericClient) -> Result<()> {
+        let item_type: i16 = self.item_type.clone().into();
+
+        conn.execute(
+            "\
+            insert into fs_items (\
+                id, \
+                item_type, \
+                parent, \
+                users_id, \
+                directory, \
+                basename, \
+                item_size, \
+                created, \
+                modified, \
+                item_exist, \
+                user_data, \
+                is_root\
+            ) values \
+            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+            &[
+                &self.id,
+                &item_type,
+                &self.parent,
+                &self.users_id,
+                &self.directory,
+                &self.basename,
+                &self.item_size,
+                &self.created,
+                &self.modified,
+                &self.item_exists,
+                &self.user_data,
+                &self.is_root
+            ]
+        ).await?;
+
         Ok(())
     }
 }

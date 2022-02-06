@@ -6,7 +6,7 @@ use serde_json::json;
 use tokio::fs::{ReadDir, read_dir, metadata};
 use tokio_postgres::GenericClient;
 
-use crate::{state::AppState, http::{Request, Response, error::{Result, Error}, response::json_response}, components::auth::get_session, db::record::{FsItem, FsItemType}, storage::ArcStorageState};
+use crate::{state::AppState, http::{Request, Response, error::{Result, Error}, response::{json_response, json_payload_response}}, components::auth::get_session, db::record::{FsItem, FsItemType}};
 
 #[inline]
 fn root_strip(uri: &Uri) -> &str {
@@ -39,6 +39,9 @@ pub async fn handle_put(state: AppState<'_>, req: Request) -> Result<Response> {
     let find_path = file_record_path(&user.id, root_strip(&head.uri));
 
     if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
+        let mut created_items: u64 = 0;
+        let mut updated_items: u64 = 0;
+        let mut missing_items: u64 = 0;
         let transaction = conn.transaction().await?;
 
         if fs_item.item_type == FsItemType::Dir {
@@ -60,13 +63,19 @@ pub async fn handle_put(state: AppState<'_>, req: Request) -> Result<Response> {
                         let entry_path = entry.path();
 
                         if entry_path.is_dir() {
-                            let id = sync_dir(
+                            let (id, created) = sync_dir(
                                 &state, 
                                 &transaction, 
                                 &user.id, 
                                 &working.id, 
                                 &entry_path
                             ).await?;
+
+                            if created {
+                                created_items += 1;
+                            } else {
+                                updated_items += 1;
+                            }
 
                             found_ids.push(id.clone());
                             working_queue.push(working);
@@ -77,13 +86,19 @@ pub async fn handle_put(state: AppState<'_>, req: Request) -> Result<Response> {
 
                             break;
                         } else if entry_path.is_file() {
-                            let id = sync_file(
+                            let (id, created) = sync_file(
                                 &state, 
                                 &transaction, 
                                 &user.id, 
                                 &working.id, 
                                 &entry_path
                             ).await?;
+
+                            if created {
+                                created_items += 1;
+                            } else {
+                                updated_items += 1;
+                            }
 
                             found_ids.push(id);
                         } else {
@@ -98,7 +113,7 @@ pub async fn handle_put(state: AppState<'_>, req: Request) -> Result<Response> {
                 ).await?;
             }
 
-            transaction.execute(
+            missing_items = transaction.execute(
                 "\
                 with recursive dir_tree as ( \
                     select fs_root.id, \
@@ -120,7 +135,7 @@ pub async fn handle_put(state: AppState<'_>, req: Request) -> Result<Response> {
                       dir_tree.id <> all($2)",
                 &[&fs_item.id, &found_ids]
             ).await?;
-        } else {
+        } else if fs_item.item_type == FsItemType::File {
             let mut fs_path = state.storage.directory.clone();
             fs_path.push(&fs_item.directory);
             fs_path.push(&fs_item.basename);
@@ -128,9 +143,11 @@ pub async fn handle_put(state: AppState<'_>, req: Request) -> Result<Response> {
             if fs_path.exists() {
                 let md = metadata(&fs_path).await?;
 
-                sync_known_file(&transaction, &md, &fs_item).await?;
+                if sync_known_file(&transaction, &md, &fs_item).await? {
+                    updated_items += 1;
+                }
             } else {
-                transaction.execute(
+                missing_items = transaction.execute(
                     "update fs_items set item_exists = false where id = $1",
                     &[&fs_item.id]
                 ).await?;
@@ -138,10 +155,12 @@ pub async fn handle_put(state: AppState<'_>, req: Request) -> Result<Response> {
         }
 
         transaction.commit().await?;
-
-        let json = json!({"message": "okay"});
     
-        json_response(200, &json)
+        json_payload_response(200, json!({
+            "created": created_items,
+            "updated": updated_items,
+            "missing": missing_items
+        }))
     } else {
         Err(Error {
             status: 404,
@@ -177,7 +196,7 @@ fn get_directory_and_basename(app: &AppState<'_>, fs_path: &PathBuf) -> Result<(
     }, true))
 }
 
-async fn sync_known_file(conn: &impl GenericClient, md: &Metadata, item: &FsItem) -> Result<()> {
+async fn sync_known_file(conn: &impl GenericClient, md: &Metadata, item: &FsItem) -> Result<bool> {
     let mut updated = false;
     let mut created_value = item.created;
     let mut modified_value = item.modified;
@@ -222,16 +241,16 @@ async fn sync_known_file(conn: &impl GenericClient, md: &Metadata, item: &FsItem
         ).await?;
     }
 
-    Ok(())
+    Ok(updated)
 }
 
-async fn sync_file(app: &AppState<'_>, conn: &impl GenericClient, users_id: &i64, parent: &i64, file_path: &PathBuf) -> Result<i64> {
+async fn sync_file(app: &AppState<'_>, conn: &impl GenericClient, users_id: &i64, parent: &i64, file_path: &PathBuf) -> Result<(i64, bool)> {
     let md = metadata(&file_path).await?;
     let (directory, basename) = get_directory_and_basename(app, file_path)?;
 
     if let Some(item) = FsItem::find_user_id_directory_basename(conn, users_id, &directory, &basename).await? {
         sync_known_file(conn, &md, &item).await?;
-        Ok(item.id)
+        Ok((item.id, false))
     } else {
         let id = app.snowflakes.fs_items.next_id().await?;
         let item_type: i16 = FsItemType::File.into();
@@ -253,11 +272,11 @@ async fn sync_file(app: &AppState<'_>, conn: &impl GenericClient, users_id: &i64
             &[&id, &item_type, parent, users_id, &directory, &basename, &created, &modified]
         ).await?;
 
-        Ok(id)
+        Ok((id, true))
     }
 }
 
-async fn sync_dir(app: &AppState<'_>, conn: &impl GenericClient, users_id: &i64, parent: &i64, dir_path: &PathBuf) -> Result<i64> {
+async fn sync_dir(app: &AppState<'_>, conn: &impl GenericClient, users_id: &i64, parent: &i64, dir_path: &PathBuf) -> Result<(i64, bool)> {
     let (directory, basename) = get_directory_and_basename(app, dir_path)?;
 
     if let Some(fs_item) = FsItem::find_user_id_directory_basename(conn, users_id, &directory, &basename).await? {
@@ -266,7 +285,7 @@ async fn sync_dir(app: &AppState<'_>, conn: &impl GenericClient, users_id: &i64,
             &[&fs_item.id]
         ).await?;
 
-        Ok(fs_item.id)
+        Ok((fs_item.id, false))
     } else {
         let md = metadata(dir_path).await?;
         let id = app.snowflakes.fs_items.await_next_id().await?;
@@ -284,6 +303,6 @@ async fn sync_dir(app: &AppState<'_>, conn: &impl GenericClient, users_id: &i64,
             &[&id, &item_type, parent, users_id, &directory, &basename, &created]
         ).await?;
 
-        Ok(id)
+        Ok((id, true))
     }
 }

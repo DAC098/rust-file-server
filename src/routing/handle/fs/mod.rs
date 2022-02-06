@@ -259,7 +259,13 @@ pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> 
             });
         }
 
-        if let Some(record) = FsItem::find_basename_with_parent(&*conn, &fs_parent.id, &basename).await? {
+        let transaction = conn.transaction().await?;
+
+        let mut rtn_record = if let Some(mut record) = FsItem::find_basename_with_parent(
+            &transaction,
+            &fs_parent.id,
+            &basename
+        ).await? {
             if !override_existing {
                 return Err(Error {
                     status: 400,
@@ -282,74 +288,49 @@ pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> 
                     source: None
                 });
             }
-        } else if post_path.exists() {
-            if !override_existing {
+
+            record.modified = Some(Utc::now());
+
+            transaction.execute(
+                "update fs_items set item_exists = true, modified = $2 where id = $1",
+                &[&record.id, &record.modified]
+            ).await?;
+
+            record
+        } else {
+            if post_path.exists() {
                 return Err(Error {
                     status: 500,
                     name: "DatabaseFileSystemMismatch".into(),
                     msg: "a file system item exists but there is no record of it".into(),
                     source: None
                 });
-            } else if post_path.is_dir() && fs_type == FsItemType::File {
-                // return Err(Error {
-                //     status: 400,
-                //     name: "CannotOverwriteDirectory".into(),
-                //     msg: "you cannot overwrite a directory with a file. delete the directory first".into(),
-                //     source: None
-                // });
-            } else if post_path.is_file() && fs_type == FsItemType::Dir {
-                // return Err(Error {
-                //     status: 400,
-                //     name: "CannotOverwriteFile".into(),
-                //     msg: "you cannot overwrite a file with a directory. delete the file first".into(),
-                //     source: None
-                // });
             }
-        }
 
-        let transaction = conn.transaction().await?;
-
-        let mut new_fs_item = {
-            let id = state.snowflakes.fs_items.next_id().await?;
-            let created = Utc::now();
-            let modified = None;
-            let parent_id = Some(fs_parent.id);
-            let fs_type_ref: i16 = fs_type.clone().into();
-
-            transaction.execute(
-                "\
-                insert into fs_items (id, item_type, parent, users_id, directory, basename, created) values \
-                ($1, $2, $3, $4, $5, $6, $7)",
-                &[
-                    &id,
-                    &fs_type_ref,
-                    &parent_id, 
-                    &user.id, 
-                    &directory, 
-                    &basename, 
-                    &created
-                ]
-            ).await?;
-
-            FsItem {
-                id,
+            let record = FsItem {
+                id: state.snowflakes.fs_items.next_id().await?,
                 item_type: fs_type,
                 parent: Some(fs_parent.id),
                 users_id: user.id,
                 directory,
                 basename,
                 item_size: 0,
-                created,
-                modified,
+                created: Utc::now(),
+                modified: None,
                 item_exists: true,
                 user_data: json!({}),
                 is_root: false
-            }
+            };
+
+            record.create(&transaction).await?;
+
+            record
         };
 
-        new_fs_item.item_size = match &new_fs_item.item_type {
+        rtn_record.item_size = match &rtn_record.item_type {
             FsItemType::File => {
                 let (_, size) = file_from_body(&post_path, false, body).await?;
+
                 size as i64
             },
             FsItemType::Dir => {
@@ -362,18 +343,13 @@ pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> 
         {
             transaction.execute(
                 "update fs_items set item_size = $2 where id = $1",
-                &[&new_fs_item.id, &new_fs_item.item_size]
+                &[&rtn_record.id, &rtn_record.item_size]
             ).await?;
         }
 
         transaction.commit().await?;
 
-        let json = json!({
-            "message": "successful",
-            "payload": new_fs_item
-        });
-
-        response::json_response(200, &json)
+        response::json_payload_response(200, rtn_record)
     } else {
         Err(Error {
             status: 404,
@@ -532,22 +508,9 @@ pub async fn handle_delete(state: AppState<'_>, req: Request) -> Result<Response
             ).await?;
         }
 
-        {
-            let modified = Some(chrono::Utc::now());
-
-            transaction.execute(
-                "update fs_items set modified = $2 where id = $1",
-                &[&fs_item.id, &modified]
-            ).await?;
-        }
-
         transaction.commit().await?;
 
-        let rtn_json = json!({
-            "message": "successful"
-        });
-
-        response::json_response(200, &rtn_json)
+        response::json_okay_response(200)
     } else {
         Err(Error {
             status: 404,
@@ -558,12 +521,12 @@ pub async fn handle_delete(state: AppState<'_>, req: Request) -> Result<Response
     }
 }
 
-async fn handle_put_upload_action(storage: ArcStorageState, mut conn: PoolConn<'_>, mut fs_item: FsItem, body: Body) -> Result<Response> {
+async fn handle_put_upload_action(storage: ArcStorageState, conn: PoolConn<'_>, mut fs_item: FsItem, body: Body) -> Result<Response> {
     if fs_item.is_root {
         return Err(Error {
             status: 400,
             name: "CannotPutRoot".into(),
-            msg: "you cannot update your roo".into(),
+            msg: "you cannot update your root directory".into(),
             source: None
         });
     }
@@ -578,11 +541,10 @@ async fn handle_put_upload_action(storage: ArcStorageState, mut conn: PoolConn<'
     let (_, size) = file_from_body(&file_path, true, body).await?;
 
     {
-        let transaction = conn.transaction().await?;
         let item_size = size as i64;
         let modified = Utc::now();
 
-        transaction.execute(
+        conn.execute(
             "\
             update fs_item \
             set modified = $2, \
@@ -592,36 +554,23 @@ async fn handle_put_upload_action(storage: ArcStorageState, mut conn: PoolConn<'
             &[&fs_item.id, &modified, &item_size]
         ).await?;
 
-        transaction.commit().await?;
-
         fs_item.modified = Some(modified);
     }
 
-    let rtn_json = json!({
-        "message": "successful",
-        "payload": fs_item
-    });
-    response::json_response(200, &rtn_json)
+    response::json_payload_response(200, fs_item)
 }
 
-async fn handle_put_user_data_action(mut conn: PoolConn<'_>, mut fs_item: FsItem, body: Body) -> Result<Response> {
+async fn handle_put_user_data_action(conn: PoolConn<'_>, mut fs_item: FsItem, body: Body) -> Result<Response> {
     let json: JsonValue = json_from_body(body).await?;
-    let transaction = conn.transaction().await?;
 
-    transaction.query_one(
+    conn.execute(
         "update fs_items set user_data = $2 where id = $1",
         &[&fs_item.id, &json]
     ).await?;
 
-    transaction.commit().await?;
-
     fs_item.user_data = json;
 
-    let rtn_json = json!({
-        "message": "successful",
-        "payload": fs_item
-    });
-    response::json_response(200, &rtn_json)
+    response::json_payload_response(200, fs_item)
 }
 
 pub async fn handle_put(state: AppState<'_>,req: Request) -> Result<Response> {

@@ -79,9 +79,9 @@ where
         .await?;
 
     while let Some(chunk) = body.next().await {
-        let bytes = chunk?;
-        file.write(&bytes).await?;
+        let mut bytes = chunk?;
         written += bytes.len();
+        file.write_all_buf(&mut bytes).await?;
     }
 
     Ok((file, written))
