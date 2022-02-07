@@ -1,42 +1,22 @@
 use std::{path::PathBuf, fs::Metadata};
 
 use chrono::{DateTime, Utc};
-use hyper::Uri;
 use serde_json::json;
 use tokio::fs::{ReadDir, read_dir, metadata};
 use tokio_postgres::GenericClient;
 
-use crate::{state::AppState, http::{Request, Response, error::{Result, Error}, response::{json_response, json_payload_response}}, components::auth::get_session, db::record::{FsItem, FsItemType}};
-
-#[inline]
-fn root_strip(uri: &Uri) -> &str {
-    uri.path().strip_prefix("/sync/").unwrap()
-}
-
-fn file_record_path(id: &i64, path: &str) -> String {
-    let id_str = id.to_string();
-
-    if path.len() == 0 {
-        id_str
-    } else {
-        let mut rtn = String::with_capacity(id_str.len() + 1 + path.len());
-        rtn.push_str(id_str.as_str());
-        rtn.push('/');
-        rtn.push_str(path);
-        rtn
-    }
-}
+use crate::{state::AppState, http::{Request, Response, error::{Result, Error}, response::json_payload_response}, components::{auth::get_session, path::join_id_and_path}, db::record::{FsItem, FsItemType}};
 
 struct WorkItem {
     iter: ReadDir,
     id: i64
 }
 
-pub async fn handle_put(state: AppState<'_>, req: Request) -> Result<Response> {
+pub async fn handle_put(state: AppState<'_>, req: Request, context: String) -> Result<Response> {
     let (head, _) = req.into_parts();
     let mut conn = state.db.pool.get().await?;
     let (user, _) = get_session(&head.headers, &*conn).await?;
-    let find_path = file_record_path(&user.id, root_strip(&head.uri));
+    let find_path = join_id_and_path( &user.id, &context);
 
     if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
         let mut created_items: u64 = 0;

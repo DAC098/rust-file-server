@@ -19,12 +19,24 @@ use crate::http::error::{
 
 mod handle;
 
+#[allow(dead_code)]
 #[inline]
 fn method_not_allowed() -> ResponseError {
     ResponseError {
         status: 405,
         name: "MethodNotAllowed".to_owned(),
         msg: "requested method is not accepted by this resource".to_owned(),
+        source: None
+    }
+}
+
+#[allow(dead_code)]
+#[inline]
+fn not_found() -> ResponseError {
+    ResponseError {
+        status: 404,
+        name: "ResourceNotFound".into(),
+        msg: "requested resource was not found".into(),
         source: None
     }
 }
@@ -41,7 +53,7 @@ impl<'a> Router<'a> {
         let path = url.path();
         let method = req.method();
 
-        if path == "/" {
+        if path.len() == 0 || path == "/" {
             return match *method {
                 Method::GET => handle::handle_get(req).await,
                 _ => Err(method_not_allowed())
@@ -76,22 +88,28 @@ impl<'a> Router<'a> {
                     _ => Err(method_not_allowed())
                 }
             }
-        } else if path.starts_with("/fs/") {
-            return match *method {
-                Method::GET => handle::fs::handle_get(state, req).await,
-                Method::POST => handle::fs::handle_post(state, req).await,
-                Method::PUT => handle::fs::handle_put(state, req).await,
-                Method::DELETE => handle::fs::handle_delete(state, req).await,
-                _ => Err(method_not_allowed())
-            }
-        } else if path.starts_with("/sync/") {
-            return match *method {
-                Method::PUT => handle::sync::handle_put(state, req).await,
-                _ => Err(method_not_allowed())
-            }
         }
 
-        handle::_static_::handle_req(state, req).await
+        if let Some((action, item)) = path.strip_prefix("/").unwrap().split_once("/") {
+            let context = item.to_owned();
+
+            match action {
+                "fs" => match *method {
+                    Method::GET => handle::fs::handle_get(state, req, context).await,
+                    Method::POST => handle::fs::handle_post(state, req, context).await,
+                    Method::PUT => handle::fs::handle_put(state, req, context).await,
+                    Method::DELETE => handle::fs::handle_delete(state, req, context).await,
+                    _ => Err(method_not_allowed())
+                },
+                "sync" => match *method {
+                    Method::PUT => handle::sync::handle_put(state, req, context).await,
+                    _ => Err(method_not_allowed())
+                },
+                _ => handle::_static_::handle_req(state, req).await
+            }
+        } else {
+            handle::_static_::handle_req(state, req).await
+        }
     }
 
     fn handle_error(error: ResponseError) -> ResponseResult<Response<Body>> {
@@ -188,38 +206,38 @@ impl Service<Request<Body>> for Router<'static> {
                         let port = remote_port.unwrap();
 
                         msg.reserve(addr.len() + 1 + port.len());
-                        msg.push_str(addr.as_str());
+                        msg.push_str(&addr);
                         msg.push(':');
-                        msg.push_str(port.as_str());
+                        msg.push_str(&port);
                     } else {
-                        msg.push_str(connection.as_str());
+                        msg.push_str(&connection);
                     }
                 } else {
-                    msg.push_str(connection.as_str());
+                    msg.push_str(&connection);
                 }
 
                 msg.reserve(
                     method.len() + 
-                    path.len() + 
-                    query.len() + 
+                    path.len() +
+                    query.len() +
                     version.len() +
                     status.len() +
                     duration.len() +
                     5
                 );
                 msg.push(' ');
-                msg.push_str(method.as_str());
+                msg.push_str(&method);
                 msg.push(' ');
-                msg.push_str(path.as_str());
-                msg.push_str(query.as_str());
+                msg.push_str(&path);
+                msg.push_str(&query);
                 msg.push(' ');
-                msg.push_str(version.as_str());
+                msg.push_str(&version);
                 msg.push(' ');
-                msg.push_str(status.as_str());
+                msg.push_str(&status);
                 msg.push(' ');
-                msg.push_str(duration.as_str());
+                msg.push_str(&duration);
 
-                println!("{}", msg);
+                log::info!("{}", msg);
             }
 
             rtn

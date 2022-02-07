@@ -11,6 +11,7 @@ use hyper::{Body, Uri};
 
 use crate::components::auth::{login_redirect, get_session};
 use crate::components::html::{check_if_html_headers, response_index_html_parts};
+use crate::components::path::join_id_and_path;
 use crate::db::record::{FsItem, FsItemType, User};
 use crate::db::types::PoolConn;
 use crate::http::body::{json_from_body, file_from_body};
@@ -101,7 +102,7 @@ async fn handle_get_info(_state: &AppState<'_>, conn: &PoolConn<'_>, _query_map:
     }
 }
 
-async fn handle_get_download(state: &AppState<'_>, conn: &PoolConn<'_>, query_map: QueryMap, user: User, fs_item: FsItem) -> Result<Response> {
+async fn handle_get_download(state: &AppState<'_>, conn: &PoolConn<'_>, query_map: QueryMap, _user: User, fs_item: FsItem) -> Result<Response> {
     let mut path = state.storage.directory.clone();
     path.push(&fs_item.directory);
     path.push(&fs_item.basename);
@@ -145,7 +146,7 @@ async fn handle_get_download(state: &AppState<'_>, conn: &PoolConn<'_>, query_ma
     }
 }
 
-pub async fn handle_get(state: AppState<'_>, req: Request) -> Result<Response> {
+pub async fn handle_get(state: AppState<'_>, req: Request, context: String) -> Result<Response> {
     let (head, _) = req.into_parts();
     let conn = state.db.pool.get().await?;
     let user = {
@@ -162,7 +163,7 @@ pub async fn handle_get(state: AppState<'_>, req: Request) -> Result<Response> {
         user
     };
 
-    let find_path = file_record_path(&user.id, root_strip(&head.uri));
+    let find_path = join_id_and_path(&user.id, &context);
 
     if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
         let query_map = uri::QueryMap::new(&head.uri);
@@ -201,13 +202,12 @@ pub async fn handle_get(state: AppState<'_>, req: Request) -> Result<Response> {
     }
 }
 
-pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> {
+pub async fn handle_post(state: AppState<'_>, req: Request, context: String) -> Result<Response> {
     let (head, body) = req.into_parts();
     let mut conn = state.db.pool.get().await?;
     let (user, _) = get_session(&head.headers, &*conn).await?;
 
-    let fs_root = root_strip(&head.uri);
-    let (mut directory, mut basename) = lib::string::get_directory_and_basename(&fs_root, false);
+    let (mut directory, mut basename) = lib::string::get_directory_and_basename(&context, false);
     basename = basename.trim().to_owned();
 
     if basename.is_empty() {
@@ -219,7 +219,7 @@ pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> 
         });
     }
 
-    directory = file_record_path(&user.id, directory.as_str());
+    directory = join_id_and_path(&user.id, &directory);
 
     if let Some(fs_parent) = FsItem::find_path(&*conn, &user.id, &directory).await? {
         let mut post_type = "file";
@@ -360,11 +360,11 @@ pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> 
     }
 }
 
-pub async fn handle_delete(state: AppState<'_>, req: Request) -> Result<Response> {
+pub async fn handle_delete(state: AppState<'_>, req: Request, context: String) -> Result<Response> {
     let (head, _) = req.into_parts();
     let mut conn = state.db.pool.get().await?;
     let (user, _) = get_session(&head.headers, &*conn).await?;
-    let find_path = file_record_path(&user.id, root_strip(&head.uri));
+    let find_path = join_id_and_path( &user.id, &context);
 
     if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
         if fs_item.is_root {
@@ -573,11 +573,11 @@ async fn handle_put_user_data_action(conn: PoolConn<'_>, mut fs_item: FsItem, bo
     response::json_payload_response(200, fs_item)
 }
 
-pub async fn handle_put(state: AppState<'_>,req: Request) -> Result<Response> {
+pub async fn handle_put(state: AppState<'_>, req: Request, context: String) -> Result<Response> {
     let (head, body) = req.into_parts();
     let conn = state.db.pool.get().await?;
     let (user, _) = get_session(&head.headers, &*conn).await?;
-    let find_path = file_record_path(&user.id, root_strip(&head.uri));
+    let find_path = join_id_and_path( &user.id, &context);
 
     if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
         let query_map = uri::QueryMap::new(&head.uri);
