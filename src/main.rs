@@ -21,8 +21,6 @@ mod components;
 
 mod routing;
 
-type JoinHandleList = Vec<tokio::task::JoinHandle<error::Result<()>>>;
-
 fn main() {
     std::process::exit(match main_entry() {
         Ok(code) => code,
@@ -85,7 +83,7 @@ async fn main_runtime(conf: config::ServerConfig) -> error::Result<i32> {
         }
     };
 
-    let mut futures_list = JoinHandleList::new();
+    let mut futures_list = Vec::new();
 
     for bind in conf.bind {
         let addr = bind.to_sockaddr();
@@ -126,14 +124,3 @@ async fn make_server(
 
     Ok(())
 }
-/*
-async fn make_watcher(directory: PathBuf) -> error::Result<()> {
-    println!("starting watcher");
-
-    if let Err(e) = watcher::watch(directory).await {
-        println!("error from watcher: {:?}", e);
-    }
-
-    Ok(())
-}
-*/

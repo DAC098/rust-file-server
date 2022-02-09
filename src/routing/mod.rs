@@ -121,7 +121,7 @@ impl<'a> Router<'a> {
             msg.write_fmt(format_args!("\n    source: {}", source))?;
         }
 
-        println!("{}", msg);
+        log::error!("{}", msg);
 
         let json = json!({"error": error.name, "message": error.msg});
 
@@ -178,7 +178,7 @@ impl Service<Request<Body>> for Router<'static> {
                     match Self::handle_error(error) {
                         Ok(err_res) => Ok(err_res),
                         Err(err) => {
-                            println!("error creating error response {}", err);
+                            log::error!("error creating error response {}", err);
 
                             Ok(Self::handle_fallback())
                         }
@@ -265,7 +265,7 @@ impl<'t> Service<&'t AddrStream> for MakeRouter<'static> {
     fn call(&mut self, addr: &'t AddrStream) -> Self::Future {
         let remote_addr = addr.remote_addr();
 
-        println!("new connection: {}", remote_addr);
+        log::info!("new connection: {}", remote_addr);
 
         let router = Router {
             connection: remote_addr.to_string(),
