@@ -1,12 +1,15 @@
-use std::fmt::Write;
+use std::convert::Infallible;
 use std::pin::Pin;
 use std::future::Future;
 use std::task::{Context, Poll};
+use std::time::Instant;
 
+use hyper::header::ToStrError;
 use lib::time::format_duration;
 use hyper::server::conn::AddrStream;
-use hyper::{Request, Response, Body, Error, Method};
+use hyper::{Request, Response, Body, Method};
 use hyper::service::Service;
+use log::{log_enabled, Level};
 use serde_json::json;
 
 use crate::http::header::copy_header_value;
@@ -39,6 +42,16 @@ fn not_found() -> ResponseError {
         msg: "requested resource was not found".into(),
         source: None
     }
+}
+
+struct RequestInfo {
+    remote_addr: Option<std::result::Result<String, ToStrError>>,
+    remote_port: Option<std::result::Result<String, ToStrError>>,
+    version: String,
+    method: String,
+    path: String,
+    query: String,
+    start: Instant,
 }
 
 pub struct Router<'a> {
@@ -113,24 +126,15 @@ impl<'a> Router<'a> {
     }
 
     fn handle_error(error: ResponseError) -> ResponseResult<Response<Body>> {
-        let mut msg = String::new();
-        msg.push_str("error during response: ");
-        msg.write_fmt(format_args!("{}", error))?;
-
-        if let Some(source) = error.source {
-            msg.write_fmt(format_args!("\n    source: {}", source))?;
-        }
-
-        log::error!("{}", msg);
+        log::error!("error during response: {}", error);
 
         let json = json!({"error": error.name, "message": error.msg});
 
         // this probably needs to be handled better
-        Response::builder()
+        Ok(Response::builder()
             .status(error.status)
             .header("content-type", "application/json")
-            .body(serde_json::to_string(&json)?.into())
-            .map_err(|err| err.into())
+            .body(serde_json::to_string(&json)?.into())?)
     }
 
     fn handle_fallback() -> Response<Body> {
@@ -144,7 +148,7 @@ impl<'a> Router<'a> {
 
 impl Service<Request<Body>> for Router<'static> {
     type Response = Response<Body>;
-    type Error = Error;
+    type Error = Infallible;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -156,21 +160,26 @@ impl Service<Request<Body>> for Router<'static> {
         let state = self.state.clone();
 
         Box::pin(async move {
-            let remote_addr = copy_header_value(req.headers(), "x-forwarded-for");
-            let remote_port = copy_header_value(req.headers(), "x-forwarded-port");
-            let version = format!("{:?}", req.version());
-            let method = req.method().as_str().to_owned();
-            let path = req.uri().path().to_owned();
-            let query = if let Some(q) = req.uri().query() {
-                let mut query = String::with_capacity(q.len() + 1);
-                query.push('?');
-                query.push_str(q);
-                query
+            let info = if log_enabled!(Level::Info) {
+                Some(RequestInfo {
+                    remote_addr: copy_header_value(req.headers(), "x-forwarded-for"),
+                    remote_port: copy_header_value(req.headers(), "x-forwarded-port"),
+                    version: format!("{:?}", req.version()),
+                    method: req.method().as_str().to_owned(),
+                    path: req.uri().path().to_owned(),
+                    query: if let Some(q) = req.uri().query() {
+                        let mut query = String::with_capacity(q.len() + 1);
+                        query.push('?');
+                        query.push_str(q);
+                        query
+                    } else {
+                        String::new()
+                    },
+                    start: std::time::Instant::now()
+                })
             } else {
-                String::new()
+                None
             };
-
-            let start = std::time::Instant::now();
 
             let rtn = match Self::handle_route(state, req).await {
                 Ok(res) => Ok(res),
@@ -186,58 +195,62 @@ impl Service<Request<Body>> for Router<'static> {
                 }
             };
 
-            if let Ok(res) = rtn.as_ref() {
-                let duration = {
-                    let d = start.elapsed();
-                    format_duration(&d)
-                };
-                let status = {
-                    let s = res.status();
-                    s.as_str().to_owned()
-                };
-                let mut msg = String::new();
+            if log_enabled!(Level::Info) {
+                let info = info.unwrap();
 
-                if remote_addr.is_some() && remote_port.is_some() {
-                    let remote_addr = remote_addr.unwrap();
-                    let remote_port = remote_port.unwrap();
-
-                    if remote_addr.is_ok() && remote_port.is_ok() {
-                        let addr = remote_addr.unwrap();
-                        let port = remote_port.unwrap();
-
-                        msg.reserve(addr.len() + 1 + port.len());
-                        msg.push_str(&addr);
-                        msg.push(':');
-                        msg.push_str(&port);
+                if let Ok(res) = rtn.as_ref() {
+                    let duration = {
+                        let d = info.start.elapsed();
+                        format_duration(&d)
+                    };
+                    let status = {
+                        let s = res.status();
+                        s.as_str().to_owned()
+                    };
+                    let mut msg = String::new();
+    
+                    if info.remote_addr.is_some() && info.remote_port.is_some() {
+                        let remote_addr = info.remote_addr.unwrap();
+                        let remote_port = info.remote_port.unwrap();
+    
+                        if remote_addr.is_ok() && remote_port.is_ok() {
+                            let addr = remote_addr.unwrap();
+                            let port = remote_port.unwrap();
+    
+                            msg.reserve(addr.len() + 1 + port.len());
+                            msg.push_str(&addr);
+                            msg.push(':');
+                            msg.push_str(&port);
+                        } else {
+                            msg.push_str(&connection);
+                        }
                     } else {
                         msg.push_str(&connection);
                     }
-                } else {
-                    msg.push_str(&connection);
+    
+                    msg.reserve(
+                        info.method.len() + 
+                        info.path.len() +
+                        info.query.len() +
+                        info.version.len() +
+                        status.len() +
+                        duration.len() +
+                        5
+                    );
+                    msg.push(' ');
+                    msg.push_str(&info.method);
+                    msg.push(' ');
+                    msg.push_str(&info.path);
+                    msg.push_str(&info.query);
+                    msg.push(' ');
+                    msg.push_str(&info.version);
+                    msg.push(' ');
+                    msg.push_str(&status);
+                    msg.push(' ');
+                    msg.push_str(&duration);
+    
+                    log::info!("{}", msg);
                 }
-
-                msg.reserve(
-                    method.len() + 
-                    path.len() +
-                    query.len() +
-                    version.len() +
-                    status.len() +
-                    duration.len() +
-                    5
-                );
-                msg.push(' ');
-                msg.push_str(&method);
-                msg.push(' ');
-                msg.push_str(&path);
-                msg.push_str(&query);
-                msg.push(' ');
-                msg.push_str(&version);
-                msg.push(' ');
-                msg.push_str(&status);
-                msg.push(' ');
-                msg.push_str(&duration);
-
-                log::info!("{}", msg);
             }
 
             rtn
@@ -255,7 +268,7 @@ pub struct MakeRouter<'a> {
 // will return another that will work on any requests from that connection.
 impl<'t> Service<&'t AddrStream> for MakeRouter<'static> {
     type Response = Router<'static>;
-    type Error = Error;
+    type Error = Infallible;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {

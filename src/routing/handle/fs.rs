@@ -7,11 +7,11 @@ use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
 use tokio::fs::{File as TokioFile, create_dir, remove_file, remove_dir};
 use tokio_util::codec::{FramedRead, BytesCodec};
-use hyper::{Body, Uri};
+use hyper::Body;
 
 use crate::components::auth::{login_redirect, get_session};
+use crate::components::fs_items::{new_resource, existing_resource};
 use crate::components::html::{check_if_html_headers, response_index_html_parts};
-use crate::components::path::join_id_and_path;
 use crate::db::record::{FsItem, FsItemType, User};
 use crate::db::types::PoolConn;
 use crate::http::body::{json_from_body, file_from_body};
@@ -41,25 +41,6 @@ struct FileRenderData {
     display_path: String,
     prev_path: String,
     item: FileItem
-}
-
-#[inline]
-fn root_strip(uri: &Uri) -> &str {
-    uri.path().strip_prefix("/fs/").unwrap()
-}
-
-fn file_record_path(id: &i64, path: &str) -> String {
-    let id_str = id.to_string();
-
-    if path.len() == 0 {
-        id_str
-    } else {
-        let mut rtn = String::with_capacity(id_str.len() + 1 + path.len());
-        rtn.push_str(id_str.as_str());
-        rtn.push('/');
-        rtn.push_str(path);
-        rtn
-    }
 }
 
 async fn handle_get_info(_state: &AppState<'_>, conn: &PoolConn<'_>, _query_map: QueryMap, user: User, fs_item: FsItem) -> Result<Response> {
@@ -163,9 +144,7 @@ pub async fn handle_get(state: AppState<'_>, req: Request, context: String) -> R
         user
     };
 
-    let find_path = join_id_and_path(&user.id, &context);
-
-    if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
+    if let Some(fs_item) = existing_resource(&*conn, &user, &context).await? {
         let query_map = uri::QueryMap::new(&head.uri);
         let mut action = "info";
 
@@ -206,22 +185,9 @@ pub async fn handle_post(state: AppState<'_>, req: Request, context: String) -> 
     let (head, body) = req.into_parts();
     let mut conn = state.db.pool.get().await?;
     let (user, _) = get_session(&head.headers, &*conn).await?;
+    let (parent, basename) = new_resource(&*conn, &user, &context).await?;
 
-    let (mut directory, mut basename) = lib::string::get_directory_and_basename(&context, false);
-    basename = basename.trim().to_owned();
-
-    if basename.is_empty() {
-        return Err(Error {
-            status: 400,
-            name: "InvalidBasename".into(),
-            msg: "basename cannot be empty and leading/trailing whitespace will be removed".into(),
-            source: None
-        });
-    }
-
-    directory = join_id_and_path(&user.id, &directory);
-
-    if let Some(fs_parent) = FsItem::find_path(&*conn, &user.id, &directory).await? {
+    if let Some(fs_parent) = parent {
         let mut post_type = "file";
         let mut override_existing = false;
         let post_path = {
@@ -307,6 +273,16 @@ pub async fn handle_post(state: AppState<'_>, req: Request, context: String) -> 
                 });
             }
 
+            let directory = if fs_parent.is_root {
+                fs_parent.basename
+            } else {
+                let mut rtn = String::with_capacity(fs_parent.directory.len() + fs_parent.basename.len() + 1);
+                rtn.push_str(&fs_parent.directory);
+                rtn.push('/');
+                rtn.push_str(&fs_parent.basename);
+                rtn
+            };
+
             let record = FsItem {
                 id: state.snowflakes.fs_items.next_id().await?,
                 item_type: fs_type,
@@ -353,8 +329,8 @@ pub async fn handle_post(state: AppState<'_>, req: Request, context: String) -> 
     } else {
         Err(Error {
             status: 404,
-            name: "DirectoryNotFound".into(),
-            msg: "the given parent directory was not found".into(),
+            name: "PathNotFound".to_owned(),
+            msg: "requested path was not found".to_owned(),
             source: None
         })
     }
@@ -364,9 +340,8 @@ pub async fn handle_delete(state: AppState<'_>, req: Request, context: String) -
     let (head, _) = req.into_parts();
     let mut conn = state.db.pool.get().await?;
     let (user, _) = get_session(&head.headers, &*conn).await?;
-    let find_path = join_id_and_path( &user.id, &context);
 
-    if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
+    if let Some(fs_item) = existing_resource(&*conn, &user, &context).await? {
         if fs_item.is_root {
             return Err(Error {
                 status: 400,
@@ -514,8 +489,8 @@ pub async fn handle_delete(state: AppState<'_>, req: Request, context: String) -
     } else {
         Err(Error {
             status: 404,
-            name: "FsItemNotFound".into(),
-            msg: "the requested item was not found".into(),
+            name: "PathNotFound".to_owned(),
+            msg: "requested path was not found".to_owned(),
             source: None
         })
     }
@@ -577,9 +552,8 @@ pub async fn handle_put(state: AppState<'_>, req: Request, context: String) -> R
     let (head, body) = req.into_parts();
     let conn = state.db.pool.get().await?;
     let (user, _) = get_session(&head.headers, &*conn).await?;
-    let find_path = join_id_and_path( &user.id, &context);
 
-    if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
+    if let Some(fs_item) = existing_resource(&*conn, &user, &context).await? {
         let query_map = uri::QueryMap::new(&head.uri);
         let default_action = "upload".to_owned();
         let action = if let Some(action) = query_map.get_value("action") {
@@ -616,8 +590,8 @@ pub async fn handle_put(state: AppState<'_>, req: Request, context: String) -> R
     } else {
         Err(Error {
             status: 404,
-            name: "FsItemNotFound".into(),
-            msg: "the requested fs item was not found".into(),
+            name: "PathNotFound".to_owned(),
+            msg: "requested path was not found".to_owned(),
             source: None
         })
     }

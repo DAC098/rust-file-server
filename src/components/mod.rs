@@ -1,3 +1,3 @@
 pub mod auth;
 pub mod html;
-pub mod path;
+pub mod fs_items;

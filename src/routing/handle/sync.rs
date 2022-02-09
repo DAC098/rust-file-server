@@ -5,7 +5,7 @@ use serde_json::json;
 use tokio::fs::{ReadDir, read_dir, metadata};
 use tokio_postgres::GenericClient;
 
-use crate::{state::AppState, http::{Request, Response, error::{Result, Error}, response::json_payload_response}, components::{auth::get_session, path::join_id_and_path}, db::record::{FsItem, FsItemType}};
+use crate::{state::AppState, http::{Request, Response, error::{Result, Error}, response::json_payload_response}, components::{auth::get_session, fs_items::existing_resource}, db::record::{FsItem, FsItemType}};
 
 struct WorkItem {
     iter: ReadDir,
@@ -16,9 +16,8 @@ pub async fn handle_put(state: AppState<'_>, req: Request, context: String) -> R
     let (head, _) = req.into_parts();
     let mut conn = state.db.pool.get().await?;
     let (user, _) = get_session(&head.headers, &*conn).await?;
-    let find_path = join_id_and_path( &user.id, &context);
 
-    if let Some(fs_item) = FsItem::find_path(&*conn, &user.id, &find_path).await? {
+    if let Some(fs_item) = existing_resource(&*conn, &user, &context).await? {
         let mut created_items: u64 = 0;
         let mut updated_items: u64 = 0;
         let mut missing_items: u64 = 0;

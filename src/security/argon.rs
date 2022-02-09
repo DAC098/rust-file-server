@@ -1,6 +1,6 @@
 use argon2::{Variant, Version, ThreadMode, Config};
 
-use crate::security::error;
+use crate::http::error;
 use crate::security::rand::rand_bytes;
 
 pub fn default_argon2_config() -> Config<'static> {
@@ -37,6 +37,6 @@ pub fn hash_with_default(
         let default = default_argon2_config();
         Ok(argon2::hash_encoded(password.as_bytes(), bytes.as_slice(), &default)?)
     } else {
-        Err(error::Error::General)
+        Err("failed to get random bytes from system".into())
     }
 }

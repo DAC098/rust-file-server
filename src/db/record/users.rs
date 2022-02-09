@@ -1,7 +1,7 @@
 use serde::Serialize;
 use tokio_postgres::GenericClient;
 
-use crate::db::types::Result;
+use crate::http::error::Result;
 
 #[derive(Debug, Serialize)]
 pub struct User {

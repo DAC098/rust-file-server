@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use tokio_postgres::GenericClient;
 use uuid::Uuid;
 
-use crate::db::types::Result;
+use crate::http::error::Result;
 
 pub struct UserSession {
     pub users_id: i64,

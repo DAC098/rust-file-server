@@ -4,7 +4,7 @@ use serde_json::Value;
 use serde_repr::{Serialize_repr, Deserialize_repr};
 use tokio_postgres::GenericClient;
 
-use crate::db::types::Result;
+use crate::http::error::Result;
 
 #[repr(i16)]
 #[derive(PartialEq, Clone, Serialize_repr, Deserialize_repr)]
@@ -60,11 +60,48 @@ pub struct FsItem {
 
 impl FsItem {
 
+    pub async fn find_id(conn: &impl GenericClient, users_id: &i64, id: &i64) -> Result<Option<FsItem>> {
+        if let Some(record) = conn.query_opt(
+            "\
+            select item_type, \
+                   parent, \
+                   directory, \
+                   basename, \
+                   item_size, \
+                   created, \
+                   modified, \
+                   item_exists, \
+                   user_data, \
+                   is_root \
+            from fs_items \
+            where users_id = $1 and \
+                  id = $2",
+            &[users_id, id]
+        ).await? {
+            Ok(Some(Self {
+                id: id.clone(),
+                item_type: record.get::<usize, i16>(0).into(),
+                parent: record.get(1),
+                users_id: users_id.clone(),
+                directory: record.get(2),
+                basename: record.get(3),
+                item_size: record.get(4),
+                created: record.get(5),
+                modified: record.get(6),
+                item_exists: record.get(7),
+                user_data: record.get(8),
+                is_root: record.get(9),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub async fn find_user_id_directory_basename(
         conn: &impl GenericClient, 
         users_id: &i64,
-        directory: &String,
-        basename: &String
+        directory: &str,
+        basename: &str
     ) -> Result<Option<FsItem>> {
         if let Some(record) = conn.query_opt(
             "\
@@ -88,8 +125,8 @@ impl FsItem {
                 item_type: record.get::<usize, i16>(1).into(),
                 parent: record.get(2),
                 users_id: users_id.clone(),
-                directory: directory.clone(),
-                basename: basename.clone(),
+                directory: directory.to_owned(),
+                basename: basename.to_owned(),
                 item_size: record.get(3),
                 created: record.get(4),
                 modified: record.get(5),
@@ -102,8 +139,8 @@ impl FsItem {
         }
     }
 
-    pub async fn find_path(conn: &impl GenericClient, users_id: &i64, path: &String) -> Result<Option<Self>> {
-        let (directory, basename) = lib::string::get_directory_and_basename(&path, true);
+    pub async fn find_path(conn: &impl GenericClient, users_id: &i64, path: &str) -> Result<Option<Self>> {
+        let (directory, basename) = lib::string::get_directory_and_basename(path, true);
 
         FsItem::find_user_id_directory_basename(conn, users_id, &directory, &basename).await
     }
