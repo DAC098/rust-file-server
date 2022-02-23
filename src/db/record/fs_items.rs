@@ -7,7 +7,7 @@ use tokio_postgres::GenericClient;
 use crate::http::error::Result;
 
 #[repr(i16)]
-#[derive(PartialEq, Clone, Serialize_repr, Deserialize_repr)]
+#[derive(Debug, PartialEq, Clone, Serialize_repr, Deserialize_repr)]
 pub enum FsItemType {
     Unknown = 0,
     File = 1,
@@ -40,7 +40,7 @@ impl From<FsItemType> for i16 {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FsItem {
     pub id: i64,
     pub item_type: FsItemType,
@@ -203,7 +203,10 @@ impl FsItem {
                    is_root \
             from fs_items \
             where users_id = $1 and \
-                  parent = $2",
+                  parent = $2 \
+            order by item_type = 2, \
+                     item_type = 1, \
+                     basename",
             &[users_id, parent]
         ).await?
         .iter()

@@ -14,6 +14,7 @@ use crate::components::fs_items::{new_resource, existing_resource};
 use crate::components::html::{check_if_html_headers, response_index_html_parts};
 use crate::db::record::{FsItem, FsItemType, User};
 use crate::db::types::PoolConn;
+use crate::event;
 use crate::http::body::{json_from_body, file_from_body};
 use crate::http::uri::QueryMap;
 use crate::http::{Request, Response};
@@ -24,7 +25,6 @@ use crate::http::{
     response,
 };
 use crate::state::AppState;
-use crate::storage::ArcStorageState;
 
 #[derive(Serialize)]
 struct FileItem {
@@ -46,6 +46,8 @@ struct FileRenderData {
 async fn handle_get_info(_state: &AppState<'_>, conn: &PoolConn<'_>, _query_map: QueryMap, user: User, fs_item: FsItem) -> Result<Response> {
     match fs_item.item_type {
         FsItemType::File => {
+            log::debug!("fs_item returning: {:#?}", fs_item);
+
             let json = json!({
                 "message": "successful",
                 "payload": fs_item
@@ -225,6 +227,7 @@ pub async fn handle_post(state: AppState<'_>, req: Request, context: String) -> 
             });
         }
 
+        let updated: bool;
         let transaction = conn.transaction().await?;
 
         let mut rtn_record = if let Some(mut record) = FsItem::find_basename_with_parent(
@@ -262,6 +265,7 @@ pub async fn handle_post(state: AppState<'_>, req: Request, context: String) -> 
                 &[&record.id, &record.modified]
             ).await?;
 
+            updated = true;
             record
         } else {
             if post_path.exists() {
@@ -300,6 +304,7 @@ pub async fn handle_post(state: AppState<'_>, req: Request, context: String) -> 
 
             record.create(&transaction).await?;
 
+            updated = false;
             record
         };
 
@@ -324,6 +329,18 @@ pub async fn handle_post(state: AppState<'_>, req: Request, context: String) -> 
         }
 
         transaction.commit().await?;
+
+        if updated {
+            state.offload.spawn(event::trigger_fs_item_updated(
+                &state, 
+                rtn_record.clone()
+            ));
+        } else {
+            state.offload.spawn(event::trigger_fs_item_created(
+                &state, 
+                rtn_record.clone()
+            ));
+        }
 
         response::json_payload_response(200, rtn_record)
     } else {
@@ -355,6 +372,7 @@ pub async fn handle_delete(state: AppState<'_>, req: Request, context: String) -
         fs_path.push(&fs_item.directory);
         fs_path.push(&fs_item.basename);
 
+        let mut deleted_records: Vec<i64> = Vec::new();
         let transaction = conn.transaction().await?;
 
         if fs_item.item_type == FsItemType::File {
@@ -374,6 +392,8 @@ pub async fn handle_delete(state: AppState<'_>, req: Request, context: String) -
                     }
                 }
             };
+
+            deleted_records.push(fs_item.id);
         } else {
             let row_stream = transaction.query_raw(
                 "\
@@ -481,9 +501,16 @@ pub async fn handle_delete(state: AppState<'_>, req: Request, context: String) -
                 "delete from fs_items where id = any(($1))",
                 &[&marked_delete]
             ).await?;
+
+            deleted_records = marked_delete;
         }
 
         transaction.commit().await?;
+
+        state.offload.spawn(event::trigger_fs_item_deleted(
+            &state,
+            deleted_records
+        ));
 
         response::json_okay_response(200)
     } else {
@@ -496,7 +523,7 @@ pub async fn handle_delete(state: AppState<'_>, req: Request, context: String) -
     }
 }
 
-async fn handle_put_upload_action(storage: ArcStorageState, conn: PoolConn<'_>, mut fs_item: FsItem, body: Body) -> Result<Response> {
+async fn handle_put_upload_action(state: &AppState<'_>, conn: PoolConn<'_>, mut fs_item: FsItem, body: Body) -> Result<Response> {
     if fs_item.is_root {
         return Err(Error {
             status: 400,
@@ -507,7 +534,7 @@ async fn handle_put_upload_action(storage: ArcStorageState, conn: PoolConn<'_>, 
     }
 
     let file_path = {
-        let mut path = storage.directory.clone();
+        let mut path = state.storage.directory.clone();
         path.push(&fs_item.directory);
         path.push(&fs_item.basename);
         path
@@ -532,10 +559,15 @@ async fn handle_put_upload_action(storage: ArcStorageState, conn: PoolConn<'_>, 
         fs_item.modified = Some(modified);
     }
 
+    state.offload.spawn(event::trigger_fs_item_updated(
+        state,
+        fs_item.clone()
+    ));
+
     response::json_payload_response(200, fs_item)
 }
 
-async fn handle_put_user_data_action(conn: PoolConn<'_>, mut fs_item: FsItem, body: Body) -> Result<Response> {
+async fn handle_put_user_data_action(state: &AppState<'_>, conn: PoolConn<'_>, mut fs_item: FsItem, body: Body) -> Result<Response> {
     let json: JsonValue = json_from_body(body).await?;
 
     conn.execute(
@@ -544,6 +576,11 @@ async fn handle_put_user_data_action(conn: PoolConn<'_>, mut fs_item: FsItem, bo
     ).await?;
 
     fs_item.user_data = json;
+
+    state.offload.spawn(event::trigger_fs_item_updated(
+        state, 
+        fs_item.clone()
+    ));
 
     response::json_payload_response(200, fs_item)
 }
@@ -576,10 +613,10 @@ pub async fn handle_put(state: AppState<'_>, req: Request, context: String) -> R
                         source: None
                     })
                 } else {
-                    handle_put_upload_action(state.storage, conn, fs_item, body).await
+                    handle_put_upload_action(&state, conn, fs_item, body).await
                 }
             },
-            "user_data" => handle_put_user_data_action(conn, fs_item, body).await,
+            "user_data" => handle_put_user_data_action(&state, conn, fs_item, body).await,
             _ => Err(Error {
                 status: 400,
                 name: "UnknownAction".into(),

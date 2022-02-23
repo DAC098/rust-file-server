@@ -161,3 +161,9 @@ impl From<argon2::Error> for Error {
         Self::with_source(error)
     }
 }
+
+impl From<reqwest::Error> for Error {
+    fn from(error: reqwest::Error) -> Self {
+        Self::with_source(error)
+    }
+}

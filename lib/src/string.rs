@@ -12,6 +12,16 @@ pub fn name_from_pathbuf(path: &PathBuf) -> Option<String> {
     }
 }
 
+pub fn make_pad_string(len: usize, pad_char: char) -> String {
+    let mut rtn = String::with_capacity(len * pad_char.len_utf8());
+
+    for _ in 0..len {
+        rtn.push(pad_char);
+    }
+
+    rtn
+}
+
 pub fn get_directory_and_basename<T>(path: T, mut no_leading: bool) -> (String, String)
 where
     T: AsRef<str>

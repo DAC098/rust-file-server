@@ -4,6 +4,7 @@ use crate::{http::{Request, error::Result, Response, response::{redirect_respons
 
 pub mod fs;
 pub mod sync;
+pub mod listeners;
 pub mod auth;
 pub mod admin;
 pub mod _static_;

@@ -3,8 +3,8 @@ use std::{sync::Arc, fmt::{Display, Formatter, Result as FmtResult}, error::Erro
 use chrono::Utc;
 use tokio::sync::Mutex;
 
-pub const SNOWFLAKE_TIMESTAMP_BITS: i64 = 42;
-pub const SNOWFLAKE_MACHINE_ID_BITS: i64 = 10;
+pub const SNOWFLAKE_TIMESTAMP_BITS: i64 = 44;
+pub const SNOWFLAKE_MACHINE_ID_BITS: i64 = 8;
 pub const SNOWFLAKE_SEQUENCE_ID_BITS: i64 = 12;
 
 pub const MAX_TIMESTAMP: i64 = (1 << SNOWFLAKE_TIMESTAMP_BITS) - 1;

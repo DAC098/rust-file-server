@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use hyper::Server;
 use futures::future::try_join_all;
 use log::{log_enabled, Level};
+use tokio::runtime::Handle;
 
 mod error;
 
@@ -16,6 +17,7 @@ mod template;
 mod snowflakes;
 mod security;
 mod state;
+mod event;
 
 mod components;
 
@@ -62,15 +64,16 @@ fn main_entry() -> error::Result<i32> {
 
     log::debug!("{:#?}", conf);
 
-    tokio::runtime::Builder::new_multi_thread()
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
         .enable_time()
         .worker_threads(conf.threads)
-        .build()?
-        .block_on(main_runtime(conf))
+        .build()?;
+
+    rt.block_on(main_runtime(conf, rt.handle().clone()))
 }
 
-async fn main_runtime(conf: config::ServerConfig) -> error::Result<i32> {
+async fn main_runtime(conf: config::ServerConfig, rt_handle: Handle) -> error::Result<i32> {
     let db_conf = conf.db;
     let storage_conf = conf.storage;
     let template_conf = conf.template;
@@ -80,6 +83,7 @@ async fn main_runtime(conf: config::ServerConfig) -> error::Result<i32> {
             storage: storage_conf.into(),
             template: template::TemplateState::new(template::build_registry(template_conf)?),
             snowflakes: snowflakes::IdSnowflakes::new(1)?,
+            offload: rt_handle
         }
     };
 

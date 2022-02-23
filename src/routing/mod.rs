@@ -101,6 +101,13 @@ impl<'a> Router<'a> {
                     _ => Err(method_not_allowed())
                 }
             }
+        } else if path == "/listeners" {
+            return match *method {
+                Method::GET => handle::listeners::handle_get(state, req).await,
+                Method::POST => handle::listeners::handle_post(state, req).await,
+                Method::DELETE => handle::listeners::handle_delete(state, req).await,
+                _ => Err(method_not_allowed())
+            }
         }
 
         if let Some((action, item)) = path.strip_prefix("/").unwrap().split_once("/") {
@@ -117,7 +124,7 @@ impl<'a> Router<'a> {
                 "sync" => match *method {
                     Method::PUT => handle::sync::handle_put(state, req, context).await,
                     _ => Err(method_not_allowed())
-                },
+                }
                 _ => handle::_static_::handle_req(state, req).await
             }
         } else {
@@ -126,7 +133,11 @@ impl<'a> Router<'a> {
     }
 
     fn handle_error(error: ResponseError) -> ResponseResult<Response<Body>> {
-        log::error!("error during response: {}", error);
+        if error.source.is_some() {
+            log::error!("error during response: {}", error);
+        } else {
+            log::info!("error response: {}", error);
+        }
 
         let json = json!({"error": error.name, "message": error.msg});
 

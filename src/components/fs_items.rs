@@ -1,6 +1,8 @@
 use tokio_postgres::GenericClient;
 
 use crate::{db::record::{User, FsItem}, http::error::{Result, Error}};
+
+#[derive(Debug)]
 pub enum ContextType {
     Id(i64),
     Path(String),

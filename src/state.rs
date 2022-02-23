@@ -5,5 +5,6 @@ pub struct AppState<'a> {
     pub db: ArcDBState,
     pub storage: ArcStorageState,
     pub template: ArcTemplateState<'a>,
-    pub snowflakes: IdSnowflakes
+    pub snowflakes: IdSnowflakes,
+    pub offload: tokio::runtime::Handle,
 }
