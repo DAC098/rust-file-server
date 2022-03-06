@@ -61,7 +61,7 @@ async fn error_wrapper(fut: impl Future<Output = Result<()>>) -> () {
     }
 }
 
-pub fn trigger_fs_item_created(state: &AppState<'_>, data: FsItem) -> impl Future<Output = ()> {
+pub fn trigger_fs_item_created(state: &AppState, data: FsItem) -> impl Future<Output = ()> {
     let db = state.db.clone();
 
     error_wrapper(async move {
@@ -104,7 +104,7 @@ pub fn trigger_fs_item_created(state: &AppState<'_>, data: FsItem) -> impl Futur
     })
 }
 
-pub fn trigger_fs_item_updated(state: &AppState<'_>, data: FsItem) -> impl Future<Output = ()> {
+pub fn trigger_fs_item_updated(state: &AppState, data: FsItem) -> impl Future<Output = ()> {
     let db = state.db.clone();
 
     error_wrapper(async move {
@@ -150,18 +150,13 @@ pub fn trigger_fs_item_updated(state: &AppState<'_>, data: FsItem) -> impl Futur
     })
 }
 
-pub fn trigger_fs_item_deleted(state: &AppState<'_>, data: Vec<i64>) -> impl Future<Output = ()> {
-    let db = state.db.clone();
-
+pub fn trigger_fs_item_deleted(_state: &AppState, _data: Vec<i64>) -> impl Future<Output = ()> {
     error_wrapper(async move {
-        let conn = db.pool.get().await?;
         Ok(())
     })
 }
 
-pub fn trigger_fs_item_synced(state: &AppState<'_>, data: FsItem) -> impl Future<Output = ()> {
-    let db = state.db.clone();
-
+pub fn trigger_fs_item_synced(_state: &AppState, _data: FsItem) -> impl Future<Output = ()> {
     error_wrapper(async move {
         Ok(())
     })

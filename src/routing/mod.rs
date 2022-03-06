@@ -1,47 +1,39 @@
 use std::convert::Infallible;
+use std::error::Error as StdError;
 use std::pin::Pin;
 use std::future::Future;
 use std::task::{Context, Poll};
 use std::time::Instant;
+use std::result::Result as StdResult;
 
 use hyper::header::ToStrError;
 use lib::time::format_duration;
 use hyper::server::conn::AddrStream;
-use hyper::{Request, Response, Body, Method};
+use hyper::{Response as HttpResponse, Method};
 use hyper::service::Service;
 use log::{log_enabled, Level};
-use serde_json::json;
 
+use crate::components;
+use crate::http::Request;
+use crate::http::Response;
 use crate::http::header::copy_header_value;
-use crate::http::response::okay_response;
+use crate::http::response::{okay_response, JsonResponseBuilder};
 use crate::state::AppState;
-use crate::http::error::{
-    Error as ResponseError,
-    Result as ResponseResult
-};
+use crate::http::error::{Error, Result};
 
 mod handle;
+// mod router;
 
 #[allow(dead_code)]
 #[inline]
-fn method_not_allowed() -> ResponseError {
-    ResponseError {
-        status: 405,
-        name: "MethodNotAllowed".to_owned(),
-        msg: "requested method is not accepted by this resource".to_owned(),
-        source: None
-    }
+fn method_not_allowed() -> Error {
+    Error::new(405, "MethodNotAllowed", "requested method is not accepted by this resource")
 }
 
 #[allow(dead_code)]
 #[inline]
-fn not_found() -> ResponseError {
-    ResponseError {
-        status: 404,
-        name: "ResourceNotFound".into(),
-        msg: "requested resource was not found".into(),
-        source: None
-    }
+fn not_found() -> Error {
+    Error::new(404, "ResourceNotFound", "requested resource was not found")
 }
 
 struct RequestInfo {
@@ -54,14 +46,34 @@ struct RequestInfo {
     start: Instant,
 }
 
-pub struct Router<'a> {
-    connection: String,
-    state: AppState<'a>
+impl RequestInfo {
+    pub fn new(req: &Request) -> RequestInfo {
+        RequestInfo {
+            remote_addr: copy_header_value(req.headers(), "x-forwarded-for"),
+            remote_port: copy_header_value(req.headers(), "x-forwarded-port"),
+            version: format!("{:?}", req.version()),
+            method: req.method().as_str().to_owned(),
+            path: req.uri().path().to_owned(),
+            query: if let Some(q) = req.uri().query() {
+                let mut query = String::with_capacity(q.len() + 1);
+                query.push('?');
+                query.push_str(q);
+                query
+            } else {
+                String::new()
+            },
+            start: std::time::Instant::now()
+        }
+    }
 }
 
-impl<'a> Router<'a> {
+pub struct Router {
+    connection: String,
+    state: AppState
+}
 
-    async fn handle_route(state: AppState<'_>, req: Request<Body>) -> ResponseResult<Response<Body>> {
+impl Router {
+    async fn handle_route(state: AppState, req: Request) -> Result<Response> {
         let url = req.uri();
         let path = url.path();
         let method = req.method();
@@ -103,9 +115,9 @@ impl<'a> Router<'a> {
             }
         } else if path == "/listeners" {
             return match *method {
-                Method::GET => handle::listeners::handle_get(state, req).await,
-                Method::POST => handle::listeners::handle_post(state, req).await,
-                Method::DELETE => handle::listeners::handle_delete(state, req).await,
+                Method::GET => components::html_wrapper(state, req, handle::listeners::handle_get).await,
+                Method::POST => components::auth_wrapper(state, req, handle::listeners::handle_post).await,
+                Method::DELETE => components::auth_wrapper(state, req, handle::listeners::handle_delete).await,
                 _ => Err(method_not_allowed())
             }
         }
@@ -115,16 +127,16 @@ impl<'a> Router<'a> {
 
             match action {
                 "fs" => match *method {
-                    Method::GET => handle::fs::handle_get(state, req, context).await,
-                    Method::POST => handle::fs::handle_post(state, req, context).await,
-                    Method::PUT => handle::fs::handle_put(state, req, context).await,
-                    Method::DELETE => handle::fs::handle_delete(state, req, context).await,
+                    Method::GET => components::html_wrapper_pass(state, req, context, handle::fs::handle_get).await,
+                    Method::POST => components::auth_wrapper_pass(state, req, context, handle::fs::handle_post).await,
+                    Method::PUT => components::auth_wrapper_pass(state, req, context, handle::fs::handle_put).await,
+                    Method::DELETE => components::auth_wrapper_pass(state, req, context, handle::fs::handle_delete).await,
                     _ => Err(method_not_allowed())
                 },
                 "sync" => match *method {
                     Method::PUT => handle::sync::handle_put(state, req, context).await,
                     _ => Err(method_not_allowed())
-                }
+                },
                 _ => handle::_static_::handle_req(state, req).await
             }
         } else {
@@ -132,24 +144,21 @@ impl<'a> Router<'a> {
         }
     }
 
-    fn handle_error(error: ResponseError) -> ResponseResult<Response<Body>> {
-        if error.source.is_some() {
-            log::error!("error during response: {}", error);
+    fn handle_error(error: Error) -> Result<Response> {
+        if let Some(err) = error.source() {
+            log::error!("error during response: {}", err);
         } else {
             log::info!("error response: {}", error);
         }
 
-        let json = json!({"error": error.name, "message": error.msg});
-
-        // this probably needs to be handled better
-        Ok(Response::builder()
-            .status(error.status)
-            .header("content-type", "application/json")
-            .body(serde_json::to_string(&json)?.into())?)
+        JsonResponseBuilder::new(error.status_ref().clone())
+            .set_error(error.name_str())
+            .set_message(error.message_str())
+            .response()
     }
 
-    fn handle_fallback() -> Response<Body> {
-        Response::builder()
+    fn handle_fallback() -> Response {
+        HttpResponse::builder()
             .status(500)
             .header("content-type", "text/plain")
             .body("server error".into())
@@ -157,37 +166,22 @@ impl<'a> Router<'a> {
     }
 }
 
-impl Service<Request<Body>> for Router<'static> {
-    type Response = Response<Body>;
+impl Service<Request> for Router {
+    type Response = Response;
     type Error = Infallible;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = Pin<Box<dyn Future<Output = StdResult<Self::Response, Self::Error>> + Send>>;
 
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<StdResult<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Request<Body>) -> Self::Future {
+    fn call(&mut self, req: Request) -> Self::Future {
         let connection = self.connection.clone();
         let state = self.state.clone();
 
         Box::pin(async move {
             let info = if log_enabled!(Level::Info) {
-                Some(RequestInfo {
-                    remote_addr: copy_header_value(req.headers(), "x-forwarded-for"),
-                    remote_port: copy_header_value(req.headers(), "x-forwarded-port"),
-                    version: format!("{:?}", req.version()),
-                    method: req.method().as_str().to_owned(),
-                    path: req.uri().path().to_owned(),
-                    query: if let Some(q) = req.uri().query() {
-                        let mut query = String::with_capacity(q.len() + 1);
-                        query.push('?');
-                        query.push_str(q);
-                        query
-                    } else {
-                        String::new()
-                    },
-                    start: std::time::Instant::now()
-                })
+                Some(RequestInfo::new(&req))
             } else {
                 None
             };
@@ -206,9 +200,7 @@ impl Service<Request<Body>> for Router<'static> {
                 }
             };
 
-            if log_enabled!(Level::Info) {
-                let info = info.unwrap();
-
+            if let Some(info) = info {
                 if let Ok(res) = rtn.as_ref() {
                     let duration = {
                         let d = info.start.elapsed();
@@ -270,19 +262,19 @@ impl Service<Request<Body>> for Router<'static> {
 }
 
 #[derive(Clone)]
-pub struct MakeRouter<'a> {
-    pub state: AppState<'a>
+pub struct MakeRouter {
+    pub state: AppState
 }
 
 // so for how this works. the service works in two steps. the first service 
 // accepts the target of the inbound connection. from there, this service 
 // will return another that will work on any requests from that connection.
-impl<'t> Service<&'t AddrStream> for MakeRouter<'static> {
-    type Response = Router<'static>;
+impl<'t> Service<&'t AddrStream> for MakeRouter {
+    type Response = Router;
     type Error = Infallible;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = Pin<Box<dyn Future<Output = StdResult<Self::Response, Self::Error>> + Send>>;
 
-    fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, _: &mut Context) -> Poll<StdResult<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 

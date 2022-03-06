@@ -5,14 +5,14 @@ use serde_json::json;
 use tokio::fs::{ReadDir, read_dir, metadata};
 use tokio_postgres::GenericClient;
 
-use crate::{state::AppState, http::{Request, Response, error::{Result, Error}, response::json_payload_response}, components::{auth::get_session, fs_items::existing_resource}, db::record::{FsItem, FsItemType}, event};
+use crate::{state::AppState, http::{Request, Response, error::{Result, Error}, response::JsonResponseBuilder}, components::{auth::get_session, fs_items::existing_resource}, db::record::{FsItem, FsItemType}, event};
 
 struct WorkItem {
     iter: ReadDir,
     id: i64
 }
 
-pub async fn handle_put(state: AppState<'_>, req: Request, context: String) -> Result<Response> {
+pub async fn handle_put(state: AppState, req: Request, context: String) -> Result<Response> {
     let (head, _) = req.into_parts();
     let mut conn = state.db.pool.get().await?;
     let (user, _) = get_session(&head.headers, &*conn).await?;
@@ -140,31 +140,22 @@ pub async fn handle_put(state: AppState<'_>, req: Request, context: String) -> R
             fs_item
         ));
     
-        json_payload_response(200, json!({
-            "created": created_items,
-            "updated": updated_items,
-            "missing": missing_items
-        }))
+        JsonResponseBuilder::new(200)
+            .payload_response(json!({
+                "created": created_items,
+                "updated": updated_items,
+                "missing": missing_items
+            }))
     } else {
-        Err(Error {
-            status: 404,
-            name: "PathNotFound".into(),
-            msg: "requested path was not found".into(),
-            source: None
-        })
+        Err(Error::new(404, "PathNotFound", "requested path was not found"))
     }
 }
 
 fn path_to_str<'a>(path: &'a PathBuf) -> Result<&'a str> {
-    path.to_str().ok_or(Error {
-        status: 400,
-        name: "NonUtf8Path".into(),
-        msg: "encountered a file system path that cannot be converted to utf-8".into(),
-        source: None
-    })
+    path.to_str().ok_or(Error::new(400, "NonUtf8Path", "encountered a file system path that cannot be converted to utf-8"))
 }
 
-fn get_directory_and_basename(app: &AppState<'_>, fs_path: &PathBuf) -> Result<(String, String)> {
+fn get_directory_and_basename(app: &AppState, fs_path: &PathBuf) -> Result<(String, String)> {
     let storage_str = path_to_str(&app.storage.directory)?;
     let working = path_to_str(fs_path)?;
 
@@ -228,7 +219,7 @@ async fn sync_known_file(conn: &impl GenericClient, md: &Metadata, item: &FsItem
     Ok(updated)
 }
 
-async fn sync_file(app: &AppState<'_>, conn: &impl GenericClient, users_id: &i64, parent: &i64, file_path: &PathBuf) -> Result<(i64, bool, bool)> {
+async fn sync_file(app: &AppState, conn: &impl GenericClient, users_id: &i64, parent: &i64, file_path: &PathBuf) -> Result<(i64, bool, bool)> {
     let md = metadata(&file_path).await?;
     let (directory, basename) = get_directory_and_basename(app, file_path)?;
 
@@ -259,7 +250,7 @@ async fn sync_file(app: &AppState<'_>, conn: &impl GenericClient, users_id: &i64
     }
 }
 
-async fn sync_dir(app: &AppState<'_>, conn: &impl GenericClient, users_id: &i64, parent: &i64, dir_path: &PathBuf) -> Result<(i64, bool, bool)> {
+async fn sync_dir(app: &AppState, conn: &impl GenericClient, users_id: &i64, parent: &i64, dir_path: &PathBuf) -> Result<(i64, bool, bool)> {
     let (directory, basename) = get_directory_and_basename(app, dir_path)?;
 
     if let Some(fs_item) = FsItem::find_user_id_directory_basename(conn, users_id, &directory, &basename).await? {

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use futures::StreamExt;
-use hyper::Body;
+use hyper::{Body, body::Buf};
 use serde::de::DeserializeOwned;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
@@ -15,56 +15,35 @@ pub async fn json_from_body<T>(mut body: Body) -> Result<T>
 where
     T: DeserializeOwned
 {
-    let mut data = String::new();
+    let mut data = Vec::new();
 
     while let Some(chunk) = body.next().await {
         let bytes = chunk?;
 
-        if let Ok(str_chunk) = std::str::from_utf8(&bytes) {
-            data.push_str(str_chunk);
-        } else {
-            return Err(Error {
-                status: 400,
-                name: "NonUTF8Body".into(),
-                msg: "given body contains invalid utf-8 characters".into(),
-                source: None
-            })
-        }
+        data.extend_from_slice(&bytes);
     }
 
-    let rtn = match serde_json::from_str::<T>(data.as_str()) {
+    match serde_json::from_slice::<T>(&data) {
         Ok(value) => Ok(value),
         Err(err) => {
             match err.classify() {
                 serde_json::error::Category::Syntax => {
-                    Err(Error {
-                        status: 400,
-                        name: "InvalidJsonBody".into(),
-                        msg: "given invalid json body".into(),
-                        source: None
-                    })
+                    Err(Error::new(400, "InvalidJsonBody", "given invalid json body"))
                 },
                 serde_json::error::Category::Data => {
-                    Err(Error {
-                        status: 400,
-                        name: "InvalidJson".into(),
-                        msg: "given json does not meet the requirements".into(),
-                        source: None
-                    })
+                    Err(Error::new(400, "InvalidJson", "given json does not meet the requirements"))
                 },
                 _ => {
-                    Err(Error {
-                        status: 500,
-                        name: "ErrorParsingJson".into(),
-                        msg: "server error when parsing json".into(),
-                        source: None
-                    })
+                    Err(Error::new_source(
+                        500, 
+                        "ErrorParsingJson", 
+                        "server error when parsing json",
+                        err
+                    ))
                 }
             }
         }
-    };
-
-    rtn
+    }
 }
 
 pub async fn file_from_body<T>(path: T, open: bool, mut body: Body) -> Result<(File, usize)>
@@ -81,7 +60,10 @@ where
     while let Some(chunk) = body.next().await {
         let mut bytes = chunk?;
         written += bytes.len();
-        file.write_all_buf(&mut bytes).await?;
+
+        while bytes.has_remaining() {
+            file.write_buf(&mut bytes).await?;
+        }
     }
 
     Ok((file, written))

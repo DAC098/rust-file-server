@@ -2,6 +2,7 @@ use tokio_postgres::Config;
 use crate::config::DBConfig;
 
 pub mod types;
+// pub mod error;
 mod shared_state;
 pub mod record;
 

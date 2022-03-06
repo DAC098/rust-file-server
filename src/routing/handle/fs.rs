@@ -9,15 +9,15 @@ use tokio::fs::{File as TokioFile, create_dir, remove_file, remove_dir};
 use tokio_util::codec::{FramedRead, BytesCodec};
 use hyper::Body;
 
-use crate::components::auth::{login_redirect, get_session};
+use crate::components::auth::SessionTuple;
 use crate::components::fs_items::{new_resource, existing_resource};
-use crate::components::html::{check_if_html_headers, response_index_html_parts};
 use crate::db::record::{FsItem, FsItemType, User};
 use crate::db::types::PoolConn;
 use crate::event;
 use crate::http::body::{json_from_body, file_from_body};
+use crate::http::response::JsonResponseBuilder;
 use crate::http::uri::QueryMap;
-use crate::http::{Request, Response};
+use crate::http::{Response, RequestTuple};
 use crate::http::{
     error::{Error, Result},
     uri,
@@ -43,17 +43,15 @@ struct FileRenderData {
     item: FileItem
 }
 
-async fn handle_get_info(_state: &AppState<'_>, conn: &PoolConn<'_>, _query_map: QueryMap, user: User, fs_item: FsItem) -> Result<Response> {
+async fn handle_get_info(_state: &AppState, conn: &PoolConn<'_>, _query_map: QueryMap, user: User, fs_item: FsItem) -> Result<Response> {
     match fs_item.item_type {
         FsItemType::File => {
-            log::debug!("fs_item returning: {:#?}", fs_item);
-
-            let json = json!({
-                "message": "successful",
-                "payload": fs_item
-            });
-        
-            response::json_response(200, &json)
+            JsonResponseBuilder::new(200)
+                .set_message("successful")
+                .payload_response(json!({
+                    "message": "successful",
+                    "payload": fs_item
+                }))
         },
         FsItemType::Dir => {
             let dir_items = FsItem::find_dir_contents(
@@ -63,29 +61,24 @@ async fn handle_get_info(_state: &AppState<'_>, conn: &PoolConn<'_>, _query_map:
             ).await?;
             let mut fs_item_json = serde_json::to_value(fs_item)?;
             fs_item_json.as_object_mut().unwrap().insert(
-                "contents".into(), 
+                "contents".into(),
                 serde_json::to_value(dir_items)?
             );
 
-            let json = json!({
-                "message": "successful",
-                "payload": fs_item_json
-            });
-
-            response::json_response(200, &json)
+            JsonResponseBuilder::new(200)
+                .set_message("successful")
+                .payload_response(json!({
+                    "message": "successful",
+                    "payload": fs_item_json
+                }))
         },
         FsItemType::Unknown => {
-            Err(Error {
-                status: 400,
-                name: "UnknownFSType".to_owned(),
-                msg: "cannot handle requested file system item".to_owned(),
-                source: None
-            })
+            Err(Error::new(400, "UnknownFsType", "cannot handle requested file system item"))
         }
     }
 }
 
-async fn handle_get_download(state: &AppState<'_>, conn: &PoolConn<'_>, query_map: QueryMap, _user: User, fs_item: FsItem) -> Result<Response> {
+async fn handle_get_download(state: &AppState, conn: &PoolConn<'_>, query_map: QueryMap, _user: User, fs_item: FsItem) -> Result<Response> {
     let mut path = state.storage.directory.clone();
     path.push(&fs_item.directory);
     path.push(&fs_item.basename);
@@ -119,32 +112,13 @@ async fn handle_get_download(state: &AppState<'_>, conn: &PoolConn<'_>, query_ma
             response::okay_text_response()
         },
         FsItemType::Unknown => {
-            Err(Error {
-                status: 400,
-                name: "UnknownFSType".to_owned(),
-                msg: "cannot handle requested file system item".to_owned(),
-                source: None
-            })
+            Err(Error::new(400, "UnknownFSType", "cannot handle requested file system item"))
         }
     }
 }
 
-pub async fn handle_get(state: AppState<'_>, req: Request, context: String) -> Result<Response> {
-    let (head, _) = req.into_parts();
+pub async fn handle_get(state: AppState, (head, _): RequestTuple, (user, _): SessionTuple, context: String) -> Result<Response> {
     let conn = state.db.pool.get().await?;
-    let user = {
-        let session_check = get_session(&head.headers, &*conn).await;
-
-        if check_if_html_headers(&head.headers)? {
-            return match session_check {
-                Ok(_) => response_index_html_parts(state.template),
-                Err(_) => login_redirect(&head.uri)
-            }
-        }
-
-        let (user, _session) = session_check?;
-        user
-    };
 
     if let Some(fs_item) = existing_resource(&*conn, &user, &context).await? {
         let query_map = uri::QueryMap::new(&head.uri);
@@ -154,39 +128,22 @@ pub async fn handle_get(state: AppState<'_>, req: Request, context: String) -> R
             if let Some(value) = value {
                 action = value.as_str();
             } else {
-                return Err(Error {
-                    status: 400,
-                    name: "NoActionValueSpecified".into(),
-                    msg: "the action query was specified but no value was given".into(),
-                    source: None
-                })
+                return Err(Error::new(400, "NoActionValueSpecified", "the action query was specified but no value was given"))
             }
         }
 
         match action {
             "info" => handle_get_info(&state, &conn, query_map, user, fs_item).await,
             "download" => handle_get_download(&state, &conn, query_map, user, fs_item).await,
-            _ => Err(Error {
-                status: 400,
-                name: "UnknownActionGiven".into(),
-                msg: "the requested action is unknown".into(),
-                source: None
-            })
+            _ => Err(Error::new(400, "UnknownActionGiven", "the requested action is unknown"))
         }
     } else {
-        Err(Error {
-            status: 404,
-            name: "PathNotFound".to_owned(),
-            msg: "requested path was not found".to_owned(),
-            source: None
-        })
+        Err(Error::new(404, "PathNotFound", "requested path was not found"))
     }
 }
 
-pub async fn handle_post(state: AppState<'_>, req: Request, context: String) -> Result<Response> {
-    let (head, body) = req.into_parts();
+pub async fn handle_post(state: AppState, (head, body): RequestTuple, (user, _): SessionTuple, context: String) -> Result<Response> {
     let mut conn = state.db.pool.get().await?;
-    let (user, _) = get_session(&head.headers, &*conn).await?;
     let (parent, basename) = new_resource(&*conn, &user, &context).await?;
 
     if let Some(fs_parent) = parent {
@@ -219,12 +176,11 @@ pub async fn handle_post(state: AppState<'_>, req: Request, context: String) -> 
         let fs_type: FsItemType = post_type.into();
 
         if fs_type == FsItemType::Unknown {
-            return Err(Error {
-                status: 400,
-                name: "UnknownType".into(),
-                msg: format!("the given type is not valid. expect file or dir, given: \"{}\"", post_type).into(),
-                source: None
-            });
+            return Err(Error::new(
+                400, 
+                "UnknownType", 
+                format!("the given type is not valid. expect file or dir, given: \"{}\"", post_type)
+            ));
         }
 
         let updated: bool;
@@ -236,26 +192,11 @@ pub async fn handle_post(state: AppState<'_>, req: Request, context: String) -> 
             &basename
         ).await? {
             if !override_existing {
-                return Err(Error {
-                    status: 400,
-                    name: "FsItemAlreadyExists".into(),
-                    msg: "the requested item already exists in the system".into(),
-                    source: None
-                });
+                return Err(Error::new(400, "FsItemAlreadyExists", "the requested item already exists in the system"));
             } else if record.item_type == FsItemType::Dir && fs_type == FsItemType::File {
-                return Err(Error {
-                    status: 400,
-                    name: "CannotOverwriteDirectory".into(),
-                    msg: "you cannot overwrite a directory with a file. delete the directory first".into(),
-                    source: None
-                });
+                return Err(Error::new(400, "CannotOverwriteDirectory", "you cannot overwrite a directory with a file. delete the directory first"));
             } else if record.item_type == FsItemType::File && fs_type == FsItemType::Dir {
-                return Err(Error {
-                    status: 400,
-                    name: "CannotOverwriteFile".into(),
-                    msg: "you cannot overwrite a file with a directory. delete the file first".into(),
-                    source: None
-                });
+                return Err(Error::new(400, "CannotOverwriteFile", "you cannot overwrite a file with a directory. delete the file first"));
             }
 
             record.modified = Some(Utc::now());
@@ -269,12 +210,7 @@ pub async fn handle_post(state: AppState<'_>, req: Request, context: String) -> 
             record
         } else {
             if post_path.exists() {
-                return Err(Error {
-                    status: 500,
-                    name: "DatabaseFileSystemMismatch".into(),
-                    msg: "a file system item exists but there is no record of it".into(),
-                    source: None
-                });
+                return Err(Error::new(500, "DatabaseFileSystemMismatch", "a file system item exists but there is no record of it"));
             }
 
             let directory = if fs_parent.is_root {
@@ -342,30 +278,19 @@ pub async fn handle_post(state: AppState<'_>, req: Request, context: String) -> 
             ));
         }
 
-        response::json_payload_response(200, rtn_record)
+        JsonResponseBuilder::new(200)
+            .payload_response(rtn_record)
     } else {
-        Err(Error {
-            status: 404,
-            name: "PathNotFound".to_owned(),
-            msg: "requested path was not found".to_owned(),
-            source: None
-        })
+        Err(Error::new(404, "PathNotFound", "requested path was not found"))
     }
 }
 
-pub async fn handle_delete(state: AppState<'_>, req: Request, context: String) -> Result<Response> {
-    let (head, _) = req.into_parts();
+pub async fn handle_delete(state: AppState, (_, _): RequestTuple, (user, _): SessionTuple, context: String) -> Result<Response> {
     let mut conn = state.db.pool.get().await?;
-    let (user, _) = get_session(&head.headers, &*conn).await?;
 
     if let Some(fs_item) = existing_resource(&*conn, &user, &context).await? {
         if fs_item.is_root {
-            return Err(Error {
-                status: 400,
-                name: "CannotDeleteRoot".into(),
-                msg: "you cannot delete your root directory".into(),
-                source: None
-            });
+            return Err(Error::new(400, "CannotDeleteRoot", "you cannot delete your root directory"));
         }
 
         let mut fs_path = state.storage.directory.clone();
@@ -427,8 +352,6 @@ pub async fn handle_delete(state: AppState<'_>, req: Request, context: String) -
 
             pin_mut!(row_stream);
 
-            // let mut is_directory = Vec::<i64>::new();
-            // let mut not_directory = Vec::<i64>::new();
             let mut dont_delete = HashSet::<i64>::new();
             let mut marked_delete = Vec::<i64>::new();
 
@@ -512,25 +435,16 @@ pub async fn handle_delete(state: AppState<'_>, req: Request, context: String) -
             deleted_records
         ));
 
-        response::json_okay_response(200)
+        JsonResponseBuilder::new(204)
+            .response()
     } else {
-        Err(Error {
-            status: 404,
-            name: "PathNotFound".to_owned(),
-            msg: "requested path was not found".to_owned(),
-            source: None
-        })
+        Err(Error::new(404, "PathNotFound", "requested path was not found"))
     }
 }
 
-async fn handle_put_upload_action(state: &AppState<'_>, conn: PoolConn<'_>, mut fs_item: FsItem, body: Body) -> Result<Response> {
+async fn handle_put_upload_action(state: &AppState, conn: PoolConn<'_>, mut fs_item: FsItem, body: Body) -> Result<Response> {
     if fs_item.is_root {
-        return Err(Error {
-            status: 400,
-            name: "CannotPutRoot".into(),
-            msg: "you cannot update your root directory".into(),
-            source: None
-        });
+        return Err(Error::new(400, "CannotPutRoot", "you cannot update your root directory"));
     }
 
     let file_path = {
@@ -564,10 +478,11 @@ async fn handle_put_upload_action(state: &AppState<'_>, conn: PoolConn<'_>, mut 
         fs_item.clone()
     ));
 
-    response::json_payload_response(200, fs_item)
+    JsonResponseBuilder::new(200)
+        .payload_response(fs_item)
 }
 
-async fn handle_put_user_data_action(state: &AppState<'_>, conn: PoolConn<'_>, mut fs_item: FsItem, body: Body) -> Result<Response> {
+async fn handle_put_user_data_action(state: &AppState, conn: PoolConn<'_>, mut fs_item: FsItem, body: Body) -> Result<Response> {
     let json: JsonValue = json_from_body(body).await?;
 
     conn.execute(
@@ -582,13 +497,12 @@ async fn handle_put_user_data_action(state: &AppState<'_>, conn: PoolConn<'_>, m
         fs_item.clone()
     ));
 
-    response::json_payload_response(200, fs_item)
+    JsonResponseBuilder::new(200)
+        .payload_response(fs_item)
 }
 
-pub async fn handle_put(state: AppState<'_>, req: Request, context: String) -> Result<Response> {
-    let (head, body) = req.into_parts();
+pub async fn handle_put(state: AppState, (head, body): RequestTuple, (user, _): SessionTuple, context: String) -> Result<Response> {
     let conn = state.db.pool.get().await?;
-    let (user, _) = get_session(&head.headers, &*conn).await?;
 
     if let Some(fs_item) = existing_resource(&*conn, &user, &context).await? {
         let query_map = uri::QueryMap::new(&head.uri);
@@ -606,30 +520,15 @@ pub async fn handle_put(state: AppState<'_>, req: Request, context: String) -> R
         match action.as_str() {
             "upload" => {
                 if fs_item.item_type == FsItemType::Dir {
-                    Err(Error {
-                        status: 400,
-                        name: "InvalidAction".into(),
-                        msg: "cannot upload a file as a directory".into(),
-                        source: None
-                    })
+                    Err(Error::new(400, "InvalidAction", "cannot upload a file as a directory"))
                 } else {
                     handle_put_upload_action(&state, conn, fs_item, body).await
                 }
             },
             "user_data" => handle_put_user_data_action(&state, conn, fs_item, body).await,
-            _ => Err(Error {
-                status: 400,
-                name: "UnknownAction".into(),
-                msg: format!("requested action is unknown: \"{}\"", *action),
-                source: None
-            })
+            _ => Err(Error::new(400, "UnknownAction", format!("requested action is unknown: \"{}\"", *action)))
         }
     } else {
-        Err(Error {
-            status: 404,
-            name: "PathNotFound".to_owned(),
-            msg: "requested path was not found".to_owned(),
-            source: None
-        })
+        Err(Error::new(404, "PathNotFound", "requested path was not found"))
     }
 }

@@ -77,14 +77,15 @@ async fn main_runtime(conf: config::ServerConfig, rt_handle: Handle) -> error::R
     let db_conf = conf.db;
     let storage_conf = conf.storage;
     let template_conf = conf.template;
+    let state = state::AppState {
+        db: db::DBState::new(db::build_config(db_conf)).await?,
+        storage: storage_conf.into(),
+        template: template::TemplateState::new(template::build_registry(template_conf)?),
+        snowflakes: snowflakes::IdSnowflakes::new(1)?,
+        offload: rt_handle
+    };
     let router = routing::MakeRouter {
-        state: state::AppState {
-            db: db::DBState::new(db::build_config(db_conf)).await?,
-            storage: storage_conf.into(),
-            template: template::TemplateState::new(template::build_registry(template_conf)?),
-            snowflakes: snowflakes::IdSnowflakes::new(1)?,
-            offload: rt_handle
-        }
+        state: state.clone()
     };
 
     let mut futures_list = Vec::new();
@@ -108,7 +109,7 @@ async fn main_runtime(conf: config::ServerConfig, rt_handle: Handle) -> error::R
 
 async fn make_server(
     addr: std::net::SocketAddr, 
-    router: routing::MakeRouter<'static>,
+    router: routing::MakeRouter,
 ) -> error::Result<()> {
     let svc = tower::ServiceBuilder::new()
         .service(router);

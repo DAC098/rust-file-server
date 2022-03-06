@@ -1,8 +1,7 @@
 use serde::Deserialize;
-use serde_json::json;
 use tokio::fs::create_dir;
 
-use crate::{http::{Request, Response, error::{Result, Error}, response::json_response, body::json_from_body}, db::record::{User, FsItemType}, components::auth::get_session, security::argon::hash_with_default, state::AppState};
+use crate::{http::{Request, Response, error::{Result, Error}, body::json_from_body, response::JsonResponseBuilder}, db::record::{User, FsItemType}, components::auth::get_session, security::argon::hash_with_default, state::AppState};
 
 #[derive(Deserialize)]
 struct NewUserJson {
@@ -11,7 +10,7 @@ struct NewUserJson {
     email: Option<String>
 }
 
-pub async fn handle_post(app: AppState<'_>, req: Request) -> Result<Response> {
+pub async fn handle_post(app: AppState, req: Request) -> Result<Response> {
     let (head, body) = req.into_parts();
     let mut conn = app.db.pool.get().await?;
     let (_user, _session) = get_session(&head.headers, &*conn).await?;
@@ -22,19 +21,9 @@ pub async fn handle_post(app: AppState<'_>, req: Request) -> Result<Response> {
     if existing.len() != 0 {
         for record in existing {
             if record.username == new_user.username {
-                return Err(Error {
-                    status: 400,
-                    name: "UsernameInUse".into(),
-                    msg: "the requested username is already in use".into(),
-                    source: None
-                })
+                return Err(Error::new(400, "UsernameInUse", "the requested username is already in use"))
             } else {
-                return Err(Error {
-                    status: 400,
-                    name: "EmailInUse".into(),
-                    msg: "the requested email is already in use".into(),
-                    source: None
-                })
+                return Err(Error::new(400, "EmailInUse", "the requested email is already in use"))
             }
         }
     }
@@ -87,6 +76,6 @@ pub async fn handle_post(app: AppState<'_>, req: Request) -> Result<Response> {
 
     transaction.commit().await?;
 
-    let json = json!({"message":"successful","payload": user});
-    json_response(200, &json)
+    JsonResponseBuilder::new(200)
+        .payload_response(user)
 }

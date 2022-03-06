@@ -6,7 +6,7 @@ use tokio_util::codec::{FramedRead, BytesCodec};
 
 use crate::{http::{Request, Response, error::Result, error::Error, response, mime::mime_type_from_ext}, state::AppState};
 
-pub async fn handle_req(state: AppState<'_>, req: Request) -> Result<Response> {
+pub async fn handle_req(state: AppState, req: Request) -> Result<Response> {
     let (head, _) = req.into_parts();
     let lookup = head.uri.path().to_owned();
     let mut to_send: Option<PathBuf> = None;
@@ -22,12 +22,11 @@ pub async fn handle_req(state: AppState<'_>, req: Request) -> Result<Response> {
 
                 for value in stripped.split("/") {
                     if value == ".." || value == "." || value.len() == 0 {
-                        return Err(Error {
-                            status: 400,
-                            name: "MalformedResourcePath".into(),
-                            msg: format!("resource path given contains invalid segments. \"..\", \".\", and \"\" are not allowed in the path"),
-                            source: None
-                        })
+                        return Err(Error::new(
+                            400, 
+                            "MalformedResourcePath", 
+                            format!("resource path given contains invalid segments. \"..\", \".\", and \"\" are not allowed in the path")
+                        ))
                     }
 
                     if first {
@@ -50,12 +49,11 @@ pub async fn handle_req(state: AppState<'_>, req: Request) -> Result<Response> {
 
     if let Some(file_path) = to_send {
         if head.method != Method::GET {
-            return Err(Error {
-                status: 405,
-                name: "MethodNotAllowed".into(),
-                msg: "requested method is not accepted by this resource".into(),
-                source: None
-            })
+            return Err(Error::new(
+                405,
+                "MethodNotAllowed",
+                "requested method is not accepted by this resource"
+            ))
         }
 
         if file_path.exists() && file_path.is_file() {
@@ -68,10 +66,5 @@ pub async fn handle_req(state: AppState<'_>, req: Request) -> Result<Response> {
         }
     }
 
-    Err(Error {
-        status: 404,
-        name: "NotFound".into(),
-        msg: "the requested resource was not found".into(),
-        source: None
-    })
+    Err(Error::new(404, "NotFound", "the requested resource was not found"))
 }

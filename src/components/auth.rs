@@ -7,15 +7,12 @@ use crate::{
     db::record::{User, UserSession}
 };
 
-pub async fn get_session(headers: &HeaderMap, conn: &impl GenericClient) -> Result<(User, UserSession)> {
+pub type SessionTuple = (User, UserSession);
+
+pub async fn get_session(headers: &HeaderMap, conn: &impl GenericClient) -> Result<SessionTuple> {
     if let Some(_auth) = headers.get("authorization") {
         // do something
-        return Err(Error {
-            status: 400,
-            name: "NotImplemented".into(),
-            msg: "bot sessions are not currently enabled".into(),
-            source: None
-        });
+        return Err(Error::new(400, "NotImplemented", "bot sessions are not currently enabled"));
     } else {
         let cookies = get_cookie_map(headers);
         let session_id_key = "session_id".to_owned();
@@ -26,12 +23,7 @@ pub async fn get_session(headers: &HeaderMap, conn: &impl GenericClient) -> Resu
                     let now = Utc::now();
 
                     if session.dropped || session.expires < now {
-                        Err(Error {
-                            status: 401,
-                            name: "SessionEnded".into(),
-                            msg: "this session has been dropped or expired".into(),
-                            source: None
-                        })
+                        Err(Error::new(401, "SessionEnded", "this session has been dropped or expired"))
                     } else {
                         Ok((
                             User::find_id(conn, &session.users_id).await?.unwrap(),
@@ -39,28 +31,13 @@ pub async fn get_session(headers: &HeaderMap, conn: &impl GenericClient) -> Resu
                         ))
                     }
                 } else {
-                    Err(Error {
-                        status: 404,
-                        name: "SessionNotFound".into(),
-                        msg: "given session id cannot be found".into(),
-                        source: None
-                    })
+                    Err(Error::new(404, "SessionNotFound", "given session id cannot be found"))
                 }
             } else {
-                Err(Error {
-                    status: 400,
-                    name: "InvalidSessionId".into(),
-                    msg: "given session id cannot be parsed".into(),
-                    source: None
-                })
+                Err(Error::new(400, "InvalidSessionId", "given session id cannot be parsed"))
             }
         } else {
-            Err(Error {
-                status: 400,
-                name: "NoSessionIdGiven".into(),
-                msg: "no session id was given".into(),
-                source: None
-            })
+            Err(Error::new(400, "NoSessionIdGiven", "no session id was given"))
         }
     }
 }

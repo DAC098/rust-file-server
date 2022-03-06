@@ -1,6 +1,5 @@
 use std::fmt;
 use std::convert::From;
-//use std::borrow::Borrow;
 
 use lib;
 
@@ -23,15 +22,32 @@ type BoxDynError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug)]
 pub struct Error {
-    pub status: u16,
-    pub name: String,
-    pub msg: String,
-    pub source: Option<BoxDynError>,
+    status: u16,
+    name: String,
+    message: String,
+    source: Option<BoxDynError>,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
+    pub fn new<N,M>(status: u16, name: N, msg: M) -> Error
+    where
+        N: Into<String>,
+        M: Into<String>
+    {
+        Error { status, name: name.into(), message: msg.into(), source: None }
+    }
+
+    pub fn new_source<N,M,S>(status: u16, name: N, msg: M, source: S) -> Error
+    where
+        N: Into<String>,
+        M: Into<String>,
+        S: Into<BoxDynError>
+    {
+        Error { status, name: name.into(), message: msg.into(), source: Some(source.into()) }
+    }
+
     pub fn with_source<T>(source: T) -> Error
     where
         T: Into<BoxDynError>
@@ -40,6 +56,18 @@ impl Error {
         rtn.source = Some(source.into());
         rtn
     }
+
+    pub fn status_ref(&self) -> &u16 {
+        &self.status
+    }
+
+    pub fn name_str(&self) -> &str {
+        &self.name
+    }
+
+    pub fn message_str(&self) -> &str {
+        &self.message
+    }
 }
 
 impl Default for Error {
@@ -47,7 +75,7 @@ impl Default for Error {
         Error {
             status: 500,
             name: "InternalServerError".to_owned(),
-            msg: "server error when responding to request".to_owned(),
+            message: "server error when responding to request".to_owned(),
             source: None
         }
     }
@@ -55,23 +83,16 @@ impl Default for Error {
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-        // not sure how to return the source error if this is ever called
-        // but
-        // if let Some(err) = self.source.as_ref() {
-        //     Some(err.borrow())
-        // } else {
-        //     None
-        // }
+        self.source.as_ref().map(|e| &**e as _)
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.name, self.msg)?;
+        write!(f, "{}: {}", self.name, self.message)?;
 
         if let Some(err) = &self.source {
-            write!(f, "\n{:?}", err)?;
+            write!(f, "\n{}", err)?;
         }
 
         Ok(())

@@ -1,7 +1,6 @@
 use argon2::verify_encoded;
 use hyper::{Body, header::SET_COOKIE};
 use serde::Deserialize;
-use serde_json::json;
 use tokio_postgres::GenericClient;
 
 use crate::{
@@ -10,7 +9,7 @@ use crate::{
         error::Result,
         error::Error,
         Response, 
-        response::{build, redirect_response, json_response}, 
+        response::{redirect_response, JsonResponseBuilder}, 
         cookie::{get_cookie_map, SetCookie, SameSite}, 
         body::json_from_body
     }, 
@@ -31,24 +30,16 @@ async fn create_session(conn: &impl GenericClient, body: Body,) -> Result<Respon
         &[&login_json.username]
     ).await? {
         if !verify_encoded(user_record.get(0), login_json.password.as_bytes())? {
-            return Err(Error {
-                status: 401,
-                name: "InvalidLogin".into(),
-                msg: "invalid password given".into(),
-                source: None
-            });
+            return Err(Error::new(401, "InvalidLogin", "invalid password given"));
         }
 
         let session_duration = chrono::Duration::days(7);
         let user_id: i64 = user_record.get(1);
         let token = uuid::Uuid::new_v4();
         let issued_on = chrono::Utc::now();
-        let expires = issued_on.clone().checked_add_signed(session_duration.clone()).ok_or(Error {
-            status: 500,
-            name: "ServerError".into(),
-            msg: "server error when creating user session".into(),
-            source: None
-        })?;
+        let expires = issued_on.clone()
+            .checked_add_signed(session_duration.clone())
+            .ok_or(Error::new(500, "ServerError", "server error when creating user session"))?;
 
         conn.execute(
             "\
@@ -62,22 +53,15 @@ async fn create_session(conn: &impl GenericClient, body: Body,) -> Result<Respon
         session_cookie.max_age = Some(session_duration);
         session_cookie.same_site = Some(SameSite::Strict);
 
-        Ok(build()
-            .status(200)
-            .header(SET_COOKIE, session_cookie)
-            .header("content-type", "application/json")
-            .body(r#"{"message":"okay"}"#.into())?)
+        JsonResponseBuilder::new(200)
+            .add_header(SET_COOKIE, session_cookie)
+            .response()
     } else {
-        Err(Error {
-            status: 404,
-            name: "UsernameNotFound".into(),
-            msg: "requested username was not found".into(),
-            source: None
-        })
+        Err(Error::new(404, "UsernameNotFound", "requested username was not found"))
     }
 }
 
-pub async fn handle_get(state: AppState<'_>,req: Request) -> Result<Response> {
+pub async fn handle_get(state: AppState, req: Request) -> Result<Response> {
     let (head, _) = req.into_parts();
     let conn = state.db.pool.get().await?;
     let session_check = get_session(&head.headers, &*conn).await;
@@ -90,23 +74,19 @@ pub async fn handle_get(state: AppState<'_>,req: Request) -> Result<Response> {
     } else {
         session_check?;
 
-        let json = json!({"message": "noop"});
-        json_response(200, &json)
+        JsonResponseBuilder::new(200)
+            .set_message("noop")
+            .response()
     }
 }
 
-pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> {
+pub async fn handle_post(state: AppState, req: Request) -> Result<Response> {
     let (head, body) = req.into_parts();
     let mut conn = state.db.pool.get().await?;
 
     if let Some(_auth) = head.headers.get("authorization") {
         // do something
-        return Err(Error {
-            status: 401,
-            name: "IncorrectLoginMethod".into(),
-            msg: "only non-bot accounts can login using this method".into(),
-            source: None
-        });
+        return Err(Error::new(401, "IncorrectLoginMethod", "only non-bot accounts can login using this method"));
     } else {
         let cookies = get_cookie_map(&head.headers);
         let session_id_key = "session_id".to_owned();
@@ -127,12 +107,7 @@ pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> 
                     return Ok(res);
                 }
             } else {
-                return Err(Error {
-                    status: 400,
-                    name: "InvalidSessionId".into(),
-                    msg: "given session id cannot be parsed as an integer".into(),
-                    source: None
-                });
+                return Err(Error::new(400, "InvalidSessionId", "given session id cannot be parsed as an integer"));
             }
         }
     }
@@ -140,18 +115,13 @@ pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> 
     create_session(&*conn, body).await
 }
 
-pub async fn handle_delete(state: AppState<'_>, req: Request) -> Result<Response> {
+pub async fn handle_delete(state: AppState, req: Request) -> Result<Response> {
     let (head, _) = req.into_parts();
     let conn = state.db.pool.get().await?;
 
     if let Some(_auth) = head.headers.get("authorization") {
         // do something
-        return Err(Error {
-            status: 401,
-            name: "IncorrectLoginMethod".into(),
-            msg: "only non-bot accounts can login using this method".into(),
-            source: None
-        });
+        return Err(Error::new(401, "IncorrectLoginMethod", "only non-bot accounts can login using this method"));
     } else {
         let cookies = get_cookie_map(&head.headers);
         let session_id_key = "session_id".to_owned();
@@ -168,34 +138,17 @@ pub async fn handle_delete(state: AppState<'_>, req: Request) -> Result<Response
                     session_cookie.max_age = Some(chrono::Duration::seconds(0));
                     session_cookie.same_site = Some(SameSite::Strict);
     
-                    Ok(build()
-                        .status(200)
-                        .header(SET_COOKIE, session_cookie)
-                        .header("content-type", "application/json")
-                        .body(r#"{"message":"okay"}"#.into())?)
+                    JsonResponseBuilder::new(200)
+                        .add_header(SET_COOKIE, session_cookie)
+                        .response()
                 } else {
-                    Err(Error {
-                        status: 404,
-                        name: "SessionNotFound".into(),
-                        msg: "given session id cannot be found".into(),
-                        source: None
-                    })
+                    Err(Error::new(404, "SessionNotFound", "given session id cannot be found"))
                 }
             } else {
-                Err(Error {
-                    status: 400,
-                    name: "InvalidSessionId".into(),
-                    msg: "given session id cannot be parsed".into(),
-                    source: None
-                })
+                Err(Error::new(400, "InvalidSessionId", "given session id cannot be parsed"))
             }
         } else {
-            Err(Error {
-                status: 400,
-                name: "NoSessionIdGiven".into(),
-                msg: "no session id was given".into(),
-                source: None
-            })
+            Err(Error::new(400, "NoSessionIdGiven", "no session id was given"))
         }
     }
 }

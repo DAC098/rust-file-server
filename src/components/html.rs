@@ -13,12 +13,7 @@ pub fn check_if_html_headers(headers: &HeaderMap) -> Result<bool> {
                     return Ok(true)
                 }
             } else {
-                return Err(Error {
-                    status: 400,
-                    name: "InvalidAcceptHeader".into(),
-                    msg: "given failed to parse given accept header value".into(),
-                    source: None
-                });
+                return Err(Error::new(400, "InvalidAcceptHeader", "given failed to parse given accept header value"));
             }
         }
     }

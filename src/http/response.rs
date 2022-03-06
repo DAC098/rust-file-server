@@ -1,10 +1,14 @@
-use chrono::Utc;
+use std::convert::TryFrom;
+
+use chrono::{Utc, DateTime};
 use hyper::Body;
+use hyper::header::{HeaderValue, HeaderName};
 use hyper::{Response as HyperResponse, http::response::Builder};
+use hyper::StatusCode;
 use serde::Serialize;
 use serde_json::json;
 
-use crate::http::error;
+use super::error;
 use super::types::{Response, Request};
 use super::mime::get_accepting_default;
 
@@ -14,57 +18,116 @@ pub fn build() -> Builder {
 }
 
 pub fn okay_text_response() -> error::Result<Response> {
-    Ok(HyperResponse::builder()
+    build()
         .status(200)
         .header("content-type", "text/plain")
-        .body("okay".into())?)
+        .body("okay".into())
+        .map_err(Into::into)
 }
 
-/*
-pub fn text_response(status: u16, data: String) -> error::Result<Response> {
-    Ok(HyperResponse::builder()
-        .status(status)
-        .header("content-type", "text/plain")
-        .body(data.into())?)
-}
-*/
-
-pub fn json_response<T>(status: u16, data: &T) -> error::Result<Response>
-where
-    T: Serialize
-{
-    Ok(HyperResponse::builder()
-        .status(status)
-        .header("content-type", "application/json")
-        .body(serde_json::to_string(data)?.into())?)
+pub fn okay_html_response() -> error::Result<Response> {
+    build()
+        .status(200)
+        .header("content-type", "text/html")
+        .body("<!DOCTYPE html>\
+        <html>\
+            <head>\
+                <title>okay</title>\
+            </head>\
+            <body>okay</body>\
+        </html>".into())
+        .map_err(Into::into)
 }
 
-pub fn json_okay_response(status: u16) -> error::Result<Response> {
-    let json = json!({
-        "message": "successful",
-        "timestamp": Utc::now().timestamp()
-    });
-
-    Ok(build()
-        .status(status)
-        .header("content-type", "application/json")
-        .body(serde_json::to_string(&json)?.into())?)
+pub struct JsonResponseBuilder {
+    builder: Builder,
+    message: String,
+    error: Option<String>,
+    timestamp: DateTime<Utc>
 }
 
-pub fn json_payload_response<T>(status: u16, data: T) -> error::Result<Response>
-where
-    T: Serialize
-{
-    let json = json!({
-        "message": "successful",
-        "timestamp": Utc::now().timestamp(),
-        "payload": data
-    });
+impl JsonResponseBuilder {
 
-    Ok(build()
-        .status(status)
-        .header("content-type", "application/json")
-        .body(serde_json::to_string(&json)?.into())?)
+    pub fn new<S>(status: S) -> JsonResponseBuilder
+    where
+        StatusCode: TryFrom<S>,
+        <StatusCode as TryFrom<S>>::Error: Into<hyper::http::Error>,
+    {
+        JsonResponseBuilder {
+            builder: build().status(status),
+            message: "successful".into(),
+            error: None,
+            timestamp: Utc::now()
+        }
+    }
+
+    pub fn set_message<M>(mut self, message: M) -> JsonResponseBuilder
+    where
+        M: Into<String>
+    {
+        self.message = message.into();
+        self
+    }
+
+    pub fn set_error<E>(mut self, error: E) -> JsonResponseBuilder
+    where
+        E: Into<String>
+    {
+        self.error = Some(error.into());
+        self
+    }
+
+    // pub fn set_timestamp(mut self, timestamp: DateTime<Utc>) -> JsonResponseBuilder {
+    //     self.timestamp = timestamp;
+    //     self
+    // }
+
+    pub fn add_header<H, V>(mut self, header: H, value: V) -> JsonResponseBuilder
+    where
+        // not really happy about this, could probably done better.
+        // this pulled straight from the
+        HeaderName: TryFrom<H>,
+        <HeaderName as TryFrom<H>>::Error: Into<hyper::http::Error>,
+        HeaderValue: TryFrom<V>,
+        <HeaderValue as TryFrom<V>>::Error: Into<hyper::http::Error>,
+    {
+        self.builder = self.builder.header(header, value);
+        self
+    }
+
+    pub fn payload_response<T>(self, payload: T) -> error::Result<Response>
+    where
+        T: Serialize
+    {
+        let mut json = json!({
+            "message": self.message,
+            "timestamp": self.timestamp.timestamp(),
+            "payload": payload
+        });
+
+        if let Some(err) = self.error {
+            json["error"] = err.into();
+        }
+
+        self.builder.header("content-type", "application/json")
+            .body(serde_json::to_vec(&json)?.into())
+            .map_err(Into::into)
+    }
+
+    pub fn response(self) -> error::Result<Response> {
+        let mut json = json!({
+            "message": self.message,
+            "timestamp": self.timestamp.timestamp()
+        });
+
+        if let Some(err) = self.error {
+            json["error"] = err.into();
+        }
+
+        self.builder.header("content-type", "application/json")
+            .body(serde_json::to_vec(&json)?.into())
+            .map_err(Into::into)
+    }
 }
 
 pub fn okay_response(req: Request) -> error::Result<Response> {
@@ -75,14 +138,12 @@ pub fn okay_response(req: Request) -> error::Result<Response> {
             if mime.subtype() == "plain" || mime.subtype() == "*" {
                 return okay_text_response();
             } else if mime.subtype() == "html" {
-                return okay_text_response();
+                return okay_html_response();
             }
         } else if mime.type_() == "application" {
             if mime.subtype() == "json" {
-                return Ok(HyperResponse::builder()
-                    .status(200)
-                    .header("content-type", "application/json")
-                    .body(r#"{"message": "okay"}"#.into())?)
+                return JsonResponseBuilder::new(200)
+                    .response()
             }
         }
     }
@@ -90,10 +151,14 @@ pub fn okay_response(req: Request) -> error::Result<Response> {
     okay_text_response()
 }
 
-pub fn redirect_response(new_path: &str) -> error::Result<Response> {
-    Ok(HyperResponse::builder()
+pub fn redirect_response<P>(new_path: P) -> error::Result<Response>
+where
+    HeaderValue: TryFrom<P>,
+    <HeaderValue as TryFrom<P>>::Error: Into<hyper::http::Error>,
+{
+    build()
         .status(302)
         .header("location", new_path)
         .body(Body::empty())
-        .unwrap())
+        .map_err(Into::into)
 }

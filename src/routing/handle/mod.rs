@@ -1,6 +1,4 @@
-use serde_json::json;
-
-use crate::{http::{Request, error::Result, Response, response::{redirect_response, json_response}}, components::{html::check_if_html_headers, auth::get_session}, db::ArcDBState};
+use crate::{http::{Request, error::Result, Response, response::{redirect_response, JsonResponseBuilder}}, components::{html::check_if_html_headers, auth::get_session}, db::ArcDBState};
 
 pub mod fs;
 pub mod sync;
@@ -23,7 +21,7 @@ pub async fn handle_get(req: Request) -> Result<Response> {
     } else {
         session?;
 
-        let rtn = json!({"message": "okay"});
-        json_response(200, &rtn)
+        JsonResponseBuilder::new(200)
+            .response()
     }
 }

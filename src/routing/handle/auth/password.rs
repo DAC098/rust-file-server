@@ -4,15 +4,17 @@ use serde::Deserialize;
 
 use crate::{
     http::{
-        Request, 
-        Response, 
-        error::Result, 
-        error::Error, 
-        body::json_from_body, 
-        cookie::{SetCookie, SameSite}, 
-        response::build
+        Request,
+        Response,
+        error::Result,
+        error::Error,
+        body::json_from_body,
+        cookie::{SetCookie, SameSite},
+        response::JsonResponseBuilder
     },
-    security::argon::hash_with_default, state::AppState, components::auth::get_session
+    security::argon::hash_with_default,
+    state::AppState,
+    components::auth::get_session
 };
 
 #[derive(Deserialize)]
@@ -21,7 +23,7 @@ pub struct PasswordJson {
     new_password: String
 }
 
-pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> {
+pub async fn handle_post(state: AppState, req: Request) -> Result<Response> {
     let (head, body) = req.into_parts();
     let mut conn = state.db.pool.get().await?;
     let (user, _) = get_session(&head.headers, &*conn).await?;
@@ -37,24 +39,16 @@ pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> 
     let json: PasswordJson = json_from_body(body).await?;
 
     if !verify_encoded(hash.as_str(), json.password.as_bytes())? {
-        return Err(Error {
-            status: 401,
-            name: "InvalidPassword".into(),
-            msg: "given password is invalid".into(),
-            source: None
-        });
+        return Err(Error::new(401, "InvalidPassword", "given password is invalid"));
     }
 
     let new_hash = hash_with_default(&json.new_password)?;
     let session_duration = chrono::Duration::days(7);
     let token = uuid::Uuid::new_v4();
     let issued_on = chrono::Utc::now();
-    let expires = issued_on.clone().checked_add_signed(session_duration.clone()).ok_or(Error {
-        status: 500,
-        name: "ServerError".into(),
-        msg: "server error when creating user session".into(),
-        source: None
-    })?;
+    let expires = issued_on.clone()
+        .checked_add_signed(session_duration.clone())
+        .ok_or(Error::new(500, "ServerError", "server error when creating user session"))?;
     let transaction = conn.transaction().await?;
 
     // these two could be run in parallel
@@ -80,9 +74,7 @@ pub async fn handle_post(state: AppState<'_>, req: Request) -> Result<Response> 
     session_cookie.max_age = Some(session_duration);
     session_cookie.same_site = Some(SameSite::Strict);
 
-    Ok(build()
-        .status(200)
-        .header(SET_COOKIE, session_cookie)
-        .header("content-type", "application/json")
-        .body(r#"{"message":"okay"}"#.into())?)
+    JsonResponseBuilder::new(200)
+        .add_header(SET_COOKIE, session_cookie)
+        .response()
 }

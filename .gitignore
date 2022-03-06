@@ -1,5 +1,5 @@
 /target
-
+/scripts/node_modules
 /test_dir
 
 server_config.yaml

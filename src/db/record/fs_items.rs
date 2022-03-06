@@ -251,7 +251,7 @@ impl FsItem {
                 item_size, \
                 created, \
                 modified, \
-                item_exist, \
+                item_exists, \
                 user_data, \
                 is_root\
             ) values \
@@ -274,4 +274,41 @@ impl FsItem {
 
         Ok(())
     }
+
+    // pub async fn update(&self, conn: &impl GenericClient) -> Result<()> {
+    //     let item_type: i16 = self.item_type.clone().into();
+
+    //     conn.execute(
+    //         "\
+    //         update fs_items\
+    //         set item_type = $2, \
+    //             parent = $3, \
+    //             users_id = $4, \
+    //             directory = $5, \
+    //             basename = $6, \
+    //             item_size = $7, \
+    //             created = $8, \
+    //             modified = $9, \
+    //             item_exists = $10, \
+    //             user_data = $11, \
+    //             is_root = $12\
+    //         where id = $1",
+    //         &[
+    //             &self.id,
+    //             &item_type,
+    //             &self.parent,
+    //             &self.users_id,
+    //             &self.directory,
+    //             &self.basename,
+    //             &self.item_size,
+    //             &self.created,
+    //             &self.modified,
+    //             &self.item_exists,
+    //             &self.user_data,
+    //             &self.is_root
+    //         ]
+    //     ).await?;
+
+    //     Ok(())
+    // }
 }

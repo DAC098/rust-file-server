@@ -5,20 +5,16 @@ use crate::{db::record::{User, FsItem}, http::error::{Result, Error}};
 #[derive(Debug)]
 pub enum ContextType {
     Id(i64),
-    Path(String),
-    Unknown
+    Path(String)
 }
 
 pub fn validate_basename(mut basename: String) -> Result<String> {
     basename = basename.trim().to_owned();
 
+    log::debug!("basename: {:?}", basename);
+
     if basename.is_empty() {
-        return Err(Error {
-            status: 400,
-            name: "InvalidBasename".into(),
-            msg: "basename caonnot be empty and leading/trailing whitespace will be removed".into(),
-            source: None
-        })
+        return Err(Error::new(400, "InvalidBasename", "basename caonnot be empty and leading/trailing whitespace will be removed"))
     }
 
     Ok(basename)
@@ -50,7 +46,7 @@ pub fn new_context(user: &User, context: &str) -> (ContextType, String) {
     if let Some((parent, basename)) = context.rsplit_once('/') {
         (existing_context(user, parent), basename.into())
     } else {
-        (ContextType::Unknown, String::new())
+        (existing_context(user, ""), context.into())
     }
 }
 
@@ -61,20 +57,16 @@ pub async fn existing_resource(conn: &impl GenericClient, user: &User, context: 
         },
         ContextType::Path(path) => {
             FsItem::find_path(conn, &user.id, &path).await
-        },
-        ContextType::Unknown => {
-            Err(Error {
-                status: 400,
-                name: "InvalidContextPath".into(),
-                msg: "the given path context was invalid".into(),
-                source: None
-            })
         }
     }
 }
 
 pub async fn new_resource(conn: &impl GenericClient, user: &User, context: &str) -> Result<(Option<FsItem>, String)> {
+    log::debug!("context: {:?}", context);
     let (existing, mut basename) = new_context(user, context);
+
+    log::debug!("context_type: {:?} basename: {:?}", existing, basename);
+
     basename = validate_basename(basename)?;
 
     match existing {
@@ -87,14 +79,6 @@ pub async fn new_resource(conn: &impl GenericClient, user: &User, context: &str)
             let record = FsItem::find_path(conn, &user.id, &path).await?;
 
             Ok((record, basename))
-        },
-        ContextType::Unknown => {
-            Err(Error {
-                status: 400,
-                name: "InvalidContextPath".into(),
-                msg: "the given path context was invalid".into(),
-                source: None
-            })
         }
     }
 }
