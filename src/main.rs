@@ -116,14 +116,14 @@ async fn make_server(
 
     match Server::try_bind(&addr) {
         Ok(builder) => {
-            println!("server listening on {}", addr);
+            log::info!("server listening on {}", addr);
 
             if let Err(e) = builder.serve(svc).await {
-                println!("server error. {:?}", e);
+                log::error!("server error. {:?}", e);
             }
         },
         Err(err) => {
-            println!("failed to bind to address. {:?}", err);
+            log::error!("failed to bind to address. {:?}", err);
         }
     }
 

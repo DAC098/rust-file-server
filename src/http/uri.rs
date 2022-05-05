@@ -47,12 +47,26 @@ impl QueryMap {
         self.0.contains_key(&key.into())
     }
 
-    pub fn get_value<K>(&self, key: K) -> Option<&Option<String>>
+    pub fn get_value<K>(&self, key: K) -> Option<Option<String>>
     where
         K: Into<String>
     {
         if let Some(list) = self.0.get(&key.into()) {
-            Some(list.first().unwrap())
+            Some(list.first()
+                .unwrap()
+                .as_ref()
+                .map(|v| v.clone()))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_value_ref<K>(&self, key: K) -> Option<&Option<String>>
+    where
+        K: Into<String>
+    {
+        if let Some(list) = self.0.get(&key.into()) {
+            list.first()
         } else {
             None
         }

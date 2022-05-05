@@ -3,14 +3,17 @@ use hyper::{Body, header::SET_COOKIE};
 use serde::Deserialize;
 use tokio_postgres::GenericClient;
 
+pub mod session_id;
+pub mod check;
+
 use crate::{
     http::{
-        Request, 
+        Request,
         error::Result,
         error::Error,
-        Response, 
-        response::{redirect_response, JsonResponseBuilder}, 
-        cookie::{get_cookie_map, SetCookie, SameSite}, 
+        Response,
+        response::{redirect_response, JsonResponseBuilder},
+        cookie::{get_cookie_map, SetCookie, SameSite},
         body::json_from_body
     }, 
     db::record::UserSession, components::{html::{response_index_html_parts, check_if_html_headers}, auth::get_session}, state::AppState
@@ -19,7 +22,8 @@ use crate::{
 #[derive(Deserialize)]
 struct LoginJson {
     username: String,
-    password: String
+    password: String,
+    totp: Option<String>
 }
 
 async fn create_session(conn: &impl GenericClient, body: Body,) -> Result<Response> {
@@ -68,15 +72,16 @@ pub async fn handle_get(state: AppState, req: Request) -> Result<Response> {
 
     if check_if_html_headers(&head.headers)? {
         match session_check {
-            Ok(_) => redirect_response("/fs/"),
+            Ok(_) => redirect_response("/auth/session"),
             Err(_) => response_index_html_parts(state.template)
         }
     } else {
-        session_check?;
+        let (user, _user_session) = session_check?;
+
+        let session_list = UserSession::find_users_id(&*conn, &user.id).await?;
 
         JsonResponseBuilder::new(200)
-            .set_message("noop")
-            .response()
+            .payload_response(session_list)
     }
 }
 

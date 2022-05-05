@@ -42,16 +42,22 @@ fn generate_integer_string(algorithm: Algorithm, secret: &[u8], digits: u32, dat
     pad_string(uint_string, digits)
 }
 
-pub fn htop(secret: &[u8], digits: u32, counter: u64) -> String {
+pub fn htop<S>(secret: S, digits: u32, counter: u64) -> String
+where
+    S: AsRef<[u8]>
+{
     let counter_bytes = counter.to_be_bytes();
     
-    generate_integer_string(hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY, secret, digits, &counter_bytes)
+    generate_integer_string(hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY, secret.as_ref(), digits, &counter_bytes)
 }
 
-pub fn totp(algorithm: Algorithm, secret: &[u8], digits: u32, step: u64, time: u64) -> String {
+pub fn totp<S>(algorithm: Algorithm, secret: S, digits: u32, step: u64, time: u64) -> String
+where
+    S: AsRef<[u8]>
+{
     let data = (time / step).to_be_bytes();
 
-    generate_integer_string(algorithm, secret, digits, &data)
+    generate_integer_string(algorithm, secret.as_ref(), digits, &data)
 }
 
 #[cfg(test)]

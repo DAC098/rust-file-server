@@ -24,6 +24,16 @@ impl From<&str> for FsItemType {
     }
 }
 
+impl From<String> for FsItemType {
+    fn from(v: String) -> Self {
+        match v.as_str() {
+            "file" => FsItemType::File,
+            "dir" => FsItemType::Dir,
+            _ => FsItemType::Unknown
+        }
+    }
+}
+
 impl From<i16> for FsItemType {
     fn from(v: i16) -> Self {
         match v {
@@ -60,11 +70,12 @@ pub struct FsItem {
 
 impl FsItem {
 
-    pub async fn find_id(conn: &impl GenericClient, users_id: &i64, id: &i64) -> Result<Option<FsItem>> {
+    pub async fn find_id(conn: &impl GenericClient, id: &i64) -> Result<Option<FsItem>> {
         if let Some(record) = conn.query_opt(
             "\
             select item_type, \
                    parent, \
+                   users_id, \
                    directory, \
                    basename, \
                    item_size, \
@@ -74,23 +85,22 @@ impl FsItem {
                    user_data, \
                    is_root \
             from fs_items \
-            where users_id = $1 and \
-                  id = $2",
-            &[users_id, id]
+            where id = $1",
+            &[id]
         ).await? {
             Ok(Some(Self {
                 id: id.clone(),
                 item_type: record.get::<usize, i16>(0).into(),
                 parent: record.get(1),
-                users_id: users_id.clone(),
-                directory: record.get(2),
-                basename: record.get(3),
-                item_size: record.get(4),
-                created: record.get(5),
-                modified: record.get(6),
-                item_exists: record.get(7),
-                user_data: record.get(8),
-                is_root: record.get(9),
+                users_id: record.get(2),
+                directory: record.get(3),
+                basename: record.get(4),
+                item_size: record.get(5),
+                created: record.get(6),
+                modified: record.get(7),
+                item_exists: record.get(8),
+                user_data: record.get(9),
+                is_root: record.get(10),
             }))
         } else {
             Ok(None)

@@ -1,4 +1,6 @@
-use crate::{http::{Request, error::Result, Response, response::{redirect_response, JsonResponseBuilder}}, components::{html::check_if_html_headers, auth::get_session}, db::ArcDBState};
+use crate::{http::{Request, error::Result, Response, response::{redirect_response, JsonResponseBuilder}}, components::{html::check_if_html_headers, auth::get_session}, db::ArcDBState, state::AppState};
+
+pub mod ping;
 
 pub mod fs;
 pub mod sync;
@@ -7,10 +9,9 @@ pub mod auth;
 pub mod admin;
 pub mod _static_;
 
-pub async fn handle_get(req: Request) -> Result<Response> {
-    let (mut head, _) = req.into_parts();
-    let db = head.extensions.remove::<ArcDBState>().unwrap();
-    let conn = db.pool.get().await?;
+pub async fn handle_get(state: AppState, req: Request) -> Result<Response> {
+    let (head, _) = req.into_parts();
+    let conn = state.db.pool.get().await?;
     let session = get_session(&head.headers, &*conn).await;
 
     if check_if_html_headers(&head.headers)? {

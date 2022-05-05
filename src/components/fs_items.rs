@@ -11,8 +11,6 @@ pub enum ContextType {
 pub fn validate_basename(mut basename: String) -> Result<String> {
     basename = basename.trim().to_owned();
 
-    log::debug!("basename: {:?}", basename);
-
     if basename.is_empty() {
         return Err(Error::new(400, "InvalidBasename", "basename caonnot be empty and leading/trailing whitespace will be removed"))
     }
@@ -53,7 +51,7 @@ pub fn new_context(user: &User, context: &str) -> (ContextType, String) {
 pub async fn existing_resource(conn: &impl GenericClient, user: &User, context: &str) -> Result<Option<FsItem>> {
     match existing_context(user, context) {
         ContextType::Id(id) => {
-            FsItem::find_id(conn, &user.id, &id).await
+            FsItem::find_id(conn, &id).await
         },
         ContextType::Path(path) => {
             FsItem::find_path(conn, &user.id, &path).await
@@ -62,16 +60,13 @@ pub async fn existing_resource(conn: &impl GenericClient, user: &User, context: 
 }
 
 pub async fn new_resource(conn: &impl GenericClient, user: &User, context: &str) -> Result<(Option<FsItem>, String)> {
-    log::debug!("context: {:?}", context);
     let (existing, mut basename) = new_context(user, context);
-
-    log::debug!("context_type: {:?} basename: {:?}", existing, basename);
 
     basename = validate_basename(basename)?;
 
     match existing {
         ContextType::Id(id) => {
-            let record = FsItem::find_id(conn, &user.id, &id).await?;
+            let record = FsItem::find_id(conn, &id).await?;
 
             Ok((record, basename))
         },

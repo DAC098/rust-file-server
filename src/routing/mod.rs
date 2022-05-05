@@ -80,7 +80,12 @@ impl Router {
 
         if path.len() == 0 || path == "/" {
             return match *method {
-                Method::GET => handle::handle_get(req).await,
+                Method::GET => handle::handle_get(state, req).await,
+                _ => Err(method_not_allowed())
+            }
+        } else if path == "/ping" {
+            return match *method {
+                Method::GET => handle::ping::handle_get(req).await,
                 _ => Err(method_not_allowed())
             }
         } else if path.starts_with("/auth/") {
@@ -89,6 +94,17 @@ impl Router {
                     Method::GET => handle::auth::session::handle_get(state, req).await,
                     Method::POST => handle::auth::session::handle_post(state, req).await,
                     Method::DELETE => handle::auth::session::handle_delete(state, req).await,
+                    _ => Err(method_not_allowed())
+                }
+            } else if path == "/auth/session/check" {
+                return match *method {
+                    Method::GET => handle::auth::session::check::handle_get(state, req).await,
+                    _ => Err(method_not_allowed())
+                }
+            } else if path.starts_with("/auth/session/") {
+                return match *method {
+                    Method::GET => handle::auth::session::session_id::handle_get(state, req).await,
+                    Method::DELETE => handle::auth::session::session_id::handle_delete(state, req).await,
                     _ => Err(method_not_allowed())
                 }
             } else if path == "/auth/password" {
@@ -105,7 +121,7 @@ impl Router {
                     Method::DELETE => okay_response(req),
                     _ => Err(method_not_allowed())
                 }
-            } else if path.starts_with("/admin/users") {
+            } else if path.starts_with("/admin/users/") {
                 return match *method {
                     Method::GET => okay_response(req),
                     Method::PUT => okay_response(req),
