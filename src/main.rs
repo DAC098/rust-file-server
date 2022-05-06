@@ -55,7 +55,7 @@ fn main_entry() -> error::Result<i32> {
     let conf = config::load_server_config(config_files)?;
 
     if log_enabled!(Level::Debug) {
-        log::debug!("env vars");
+        log::debug!("env vars:");
 
         for (key, value) in std::env::vars() {
             log::debug!("{} {}", key, value);
@@ -84,21 +84,24 @@ async fn main_runtime(conf: config::ServerConfig, rt_handle: Handle) -> error::R
         snowflakes: snowflakes::IdSnowflakes::new(1)?,
         offload: rt_handle
     };
-    let router = routing::MakeRouter {
-        state: state.clone()
-    };
 
     let mut futures_list = Vec::new();
 
     for bind in conf.bind {
-        let addr = bind.to_sockaddr();
+        match bind.to_sockaddr() {
+            Ok(addr) => {
+                let fut = tokio::spawn(make_server(
+                    addr,
+                    routing::MakeRouter {
+                        state: state.clone()
+                    }
+                ));
 
-        if addr.is_err() {
-            println!("{}", addr.unwrap_err());
-        } else {
-            futures_list.push(tokio::spawn(
-                make_server(addr.unwrap(), router.clone())
-            ));
+                futures_list.push(fut);
+            },
+            Err(err) => {
+                log::error!("{}", err);
+            }
         }
     }
 
