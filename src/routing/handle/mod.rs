@@ -1,4 +1,4 @@
-use crate::{http::{Request, error::Result, Response, response::{redirect_response, JsonResponseBuilder}}, components::{html::check_if_html_headers, auth::get_session}, db::ArcDBState, state::AppState};
+use crate::{http::{Request, error::Result, Response, response::{redirect_response, JsonResponseBuilder}}, components::{html::check_if_html_headers, auth::get_session}, state::AppState};
 
 pub mod ping;
 

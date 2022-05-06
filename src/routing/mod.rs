@@ -96,11 +96,6 @@ impl Router {
                     Method::DELETE => handle::auth::session::handle_delete(state, req).await,
                     _ => Err(method_not_allowed())
                 }
-            } else if path == "/auth/session/check" {
-                return match *method {
-                    Method::GET => handle::auth::session::check::handle_get(state, req).await,
-                    _ => Err(method_not_allowed())
-                }
             } else if path.starts_with("/auth/session/") {
                 return match *method {
                     Method::GET => handle::auth::session::session_id::handle_get(state, req).await,

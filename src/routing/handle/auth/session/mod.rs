@@ -4,7 +4,6 @@ use serde::Deserialize;
 use tokio_postgres::GenericClient;
 
 pub mod session_id;
-pub mod check;
 
 use crate::{
     http::{
