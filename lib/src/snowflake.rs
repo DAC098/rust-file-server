@@ -18,6 +18,7 @@ const SNOWFLAKE_SEQUENCE_ID_BIT_MASK: i64 = MAX_MACHINE_ID;
 pub enum Error {
     MachineIdTooLarge,
     StartTimeTooLarge,
+    StartTimeInFuture,
     TimestampMaxReached,
     SequenceMaxReached,
 }
@@ -32,6 +33,9 @@ impl Display for Error {
             ),
             Error::StartTimeTooLarge => write!(
                 f, "the requested start time is too large. the value cannot be larger than {}", MAX_TIMESTAMP
+            ),
+            Error::StartTimeInFuture => write!(
+                f, "the requested start time is in the future when compared to now."
             ),
             Error::TimestampMaxReached => write!(
                 f, "max timestamp amount reached"
@@ -68,11 +72,17 @@ impl TokioSnowflake {
             return Err(Error::StartTimeTooLarge);
         }
 
+        let now = current_timestamp_millis();
+
+        if start_time > now {
+            return Err(Error::StartTimeInFuture);
+        }
+
         Ok(TokioSnowflake {
             start_time,
             machine_id,
-            sequence: Arc::new( Mutex::new(1)),
-            prev_time: Arc::new(Mutex::new(current_timestamp_millis()))
+            sequence: Arc::new(Mutex::new(1)),
+            prev_time: Arc::new(Mutex::new(now))
         })
     }
 
@@ -123,7 +133,6 @@ impl TokioSnowflake {
     }
 }
 
-#[inline]
 fn current_timestamp_millis() -> i64 {
     let now = std::time::SystemTime::now();
 
