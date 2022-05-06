@@ -1,7 +1,6 @@
-use std::{sync::Arc, fmt::{Display, Formatter, Result as FmtResult}, error::Error as StdError};
+use std::{sync::Arc, fmt::{Display, Formatter, Result as FmtResult}, error::Error as StdError, time::Duration};
 
-use chrono::Utc;
-use tokio::sync::Mutex;
+use tokio::{time, sync::Mutex};
 
 pub const SNOWFLAKE_TIMESTAMP_BITS: i64 = 44;
 pub const SNOWFLAKE_MACHINE_ID_BITS: i64 = 8;
@@ -73,12 +72,12 @@ impl TokioSnowflake {
             start_time,
             machine_id,
             sequence: Arc::new( Mutex::new(1)),
-            prev_time: Arc::new(Mutex::new(1))
+            prev_time: Arc::new(Mutex::new(current_timestamp_millis()))
         })
     }
 
     pub async fn next_id(&self) -> Result<i64> {
-        let now = current_timestamp() - self.start_time;
+        let now = current_timestamp_millis() - self.start_time;
         let mut seq_value: i64 = 1;
 
         if now > MAX_TIMESTAMP {
@@ -113,7 +112,8 @@ impl TokioSnowflake {
             Err(err) => {
                 match err {
                     Error::SequenceMaxReached => {
-                        // wait here
+                        time::sleep(Duration::from_millis(1)).await;
+
                         self.next_id().await
                     },
                     _ => Err(err)
@@ -124,8 +124,21 @@ impl TokioSnowflake {
 }
 
 #[inline]
-fn current_timestamp() -> i64 {
-    Utc::now().timestamp_millis()
+fn current_timestamp_millis() -> i64 {
+    let now = std::time::SystemTime::now();
+
+    match now.duration_since(std::time::SystemTime::UNIX_EPOCH) {
+        Ok(duration) => {
+            let sec: u64 = duration.as_secs() * 1000;
+            let millis: u64 = duration.subsec_millis().into();
+
+            match i64::try_from(sec + millis) {
+                Ok(v) => v,
+                Err(error) => panic!("WHAT YEAR IS IT!! {}", error)
+            }
+        },
+        Err(error) => panic!("WE HAVE GONE BACK IN TIME!! {}", error)
+    }
 }
 
 pub fn decompose(value: i64) -> (i64,i64,i64) {
