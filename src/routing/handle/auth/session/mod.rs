@@ -14,8 +14,16 @@ use crate::{
         response::{redirect_response, JsonResponseBuilder},
         cookie::{get_cookie_map, SetCookie, SameSite},
         body::json_from_body
+    },
+    db::record::{UserSession, User},
+    components::{
+        html::{
+            response_index_html_parts,
+            check_if_html_headers
+        }, 
+        auth::{get_session, verify_totp_code}
     }, 
-    db::record::UserSession, components::{html::{response_index_html_parts, check_if_html_headers}, auth::get_session}, state::AppState
+    state::AppState
 };
 
 #[derive(Deserialize)]
@@ -28,16 +36,20 @@ struct LoginJson {
 async fn create_session(conn: &impl GenericClient, body: Body,) -> Result<Response> {
     let login_json: LoginJson = json_from_body(body).await?;
 
-    if let Some(user_record) = conn.query_opt(
-        "select hash, id from users where username = $1",
-        &[&login_json.username]
-    ).await? {
-        if !verify_encoded(user_record.get(0), login_json.password.as_bytes())? {
+    if let Some(user) = User::find_username(conn, &login_json.username).await? {
+        if !verify_encoded(&user.hash, login_json.password.as_bytes())? {
             return Err(Error::new(401, "InvalidLogin", "invalid password given"));
         }
 
+        if user.totp_enabled {
+            if let Some(code) = login_json.totp {
+                verify_totp_code(&user, code)?;
+            } else {
+                return Err(Error::new(400, "MissingTOTP", "requires totp code"));
+            }
+        }
+
         let session_duration = chrono::Duration::days(7);
-        let user_id: i64 = user_record.get(1);
         let token = uuid::Uuid::new_v4();
         let issued_on = chrono::Utc::now();
         let expires = issued_on.clone()
@@ -48,13 +60,14 @@ async fn create_session(conn: &impl GenericClient, body: Body,) -> Result<Respon
             "\
             insert into user_sessions (users_id, token, issued_on, expires) values \
             ($1, $2, $3, $4)",
-            &[&user_id, &token, &issued_on, &expires]
+            &[&user.id, &token, &issued_on, &expires]
         ).await?;
 
         let mut session_cookie = SetCookie::new("session_id".into(), token.to_string());
         session_cookie.path = Some("/".into());
         session_cookie.max_age = Some(session_duration);
         session_cookie.same_site = Some(SameSite::Strict);
+        session_cookie.http_only = true;
 
         JsonResponseBuilder::new(200)
             .add_header(SET_COOKIE, session_cookie)

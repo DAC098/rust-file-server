@@ -659,6 +659,7 @@ dependencies = [
  "mime",
  "notify",
  "num_cpus",
+ "otp",
  "regex",
  "reqwest",
  "ring",

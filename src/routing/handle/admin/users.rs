@@ -32,20 +32,25 @@ pub async fn handle_post(app: AppState, req: Request) -> Result<Response> {
     let user = {
         let id = app.snowflakes.users.next_id().await?;
         let hash = hash_with_default(&new_user.password)?;
-        let email_verified = false;
 
         transaction.query(
             "\
-            insert into users (id, username, hash, email, email_verified) values \
-            ($1, $2, $3, $4, $5)", 
-            &[&id, &new_user.username, &hash, &new_user.email, &email_verified]
+            insert into users (id, username, hash, email) values \
+            ($1, $2, $3, $4)",
+            &[&id, &new_user.username, &hash, &new_user.email]
         ).await?;
 
         User {
             id,
             username: new_user.username,
+            hash,
             email: new_user.email,
-            email_verified
+            email_verified: false,
+            totp_enabled: false,
+            totp_algorithm: None,
+            totp_secret: None,
+            totp_step: None,
+            totp_digits: None
         }
     };
 

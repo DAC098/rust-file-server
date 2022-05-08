@@ -10,6 +10,7 @@ members = ["lib", "otp"]
 
 [dependencies]
 lib = { path = "./lib" }
+otp = { path = "./otp" }
 
 shape-rs = { git = "https://github.com/dac098/shape-rs" }
 

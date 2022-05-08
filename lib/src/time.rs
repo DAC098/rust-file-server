@@ -7,10 +7,6 @@ use std::{
 
 use chrono::{DateTime, Utc, NaiveDateTime};
 
-pub fn systemtime_to_utc_seconds(time: SystemTime) -> i64 {
-    chrono::DateTime::<chrono::Utc>::from(time).timestamp()
-}
-
 pub fn format_duration(duration: &Duration) -> String {
     if duration.as_secs() != 0 {
         format!("{}s", duration.as_secs())
@@ -58,6 +54,38 @@ pub fn unix_epoch_systemtime(time: &SystemTime) -> i64 {
             } else {
                 -sec - 1
             }
+        }
+    }
+}
+
+pub fn unix_epoch_sec_now() -> Option<u64> {
+    let now = SystemTime::now();
+
+    match now.duration_since(UNIX_EPOCH) {
+        Ok(duration) => {
+            Some(duration.as_secs())
+        },
+        Err(_error) => {
+            None
+        }
+    }
+}
+
+pub fn unix_epoch_millis_now() -> Option<u64> {
+    let now = SystemTime::now();
+
+    match now.duration_since(UNIX_EPOCH) {
+        Ok(duration) => {
+            if let Some(sec) = duration.as_secs().checked_mul(1000) {
+                let millis: u64 = duration.subsec_millis().into();
+
+                Some(sec + millis)
+            } else {
+                None
+            }
+        },
+        Err(_error) => {
+            None
         }
     }
 }
