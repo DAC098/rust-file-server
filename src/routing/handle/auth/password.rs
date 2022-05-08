@@ -15,7 +15,8 @@ use crate::{
     },
     security::argon::hash_with_default,
     state::AppState,
-    components::auth::{get_session, verify_totp_code}
+    components::auth::{get_session, verify_totp_code}, 
+    db::record::UserSession
 };
 
 #[derive(Deserialize)]
@@ -45,15 +46,10 @@ pub async fn handle_post(state: AppState, req: Request) -> Result<Response> {
     }
 
     let new_hash = hash_with_default(&json.new_password)?;
-    let session_duration = chrono::Duration::days(7);
-    let token = uuid::Uuid::new_v4();
-    let issued_on = chrono::Utc::now();
-    let expires = issued_on.clone()
-        .checked_add_signed(session_duration.clone())
-        .ok_or(Error::new(500, "ServerError", "server error when creating user session"))?;
+    let session_duration = UserSession::default_duration();
+    let session_record = UserSession::new(user.id.clone(), &session_duration)?;
     let transaction = conn.transaction().await?;
 
-    // these two could be run in parallel
     try_join(
         transaction.execute(
             "update users set hash = $2 where id = $1",
@@ -65,18 +61,13 @@ pub async fn handle_post(state: AppState, req: Request) -> Result<Response> {
         )
     ).await?;
 
-    transaction.execute(
-        "\
-        insert into user_sessions (users_id, token, issued_on, expires) values \
-        ($1, $2, $3, $4)",
-        &[&user.id, &token, &issued_on, &expires]
-    ).await?;
-
     transaction.commit().await?;
 
-    let mut session_cookie = SetCookie::new("session_id".into(), token.to_string());
+    let mut session_cookie = SetCookie::new("session_id", session_record.token.to_string());
+    session_cookie.path = Some("/".into());
     session_cookie.max_age = Some(session_duration);
     session_cookie.same_site = Some(SameSite::Strict);
+    session_cookie.http_only = true;
 
     JsonResponseBuilder::new(200)
         .add_header(SET_COOKIE, session_cookie)

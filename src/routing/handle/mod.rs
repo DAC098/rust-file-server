@@ -2,11 +2,13 @@ use crate::{http::{Request, error::Result, Response, response::{redirect_respons
 
 pub mod ping;
 
+pub mod auth;
+pub mod admin;
+
+pub mod session;
 pub mod fs;
 pub mod sync;
 pub mod listeners;
-pub mod auth;
-pub mod admin;
 pub mod _static_;
 
 pub async fn handle_get(state: AppState, req: Request) -> Result<Response> {

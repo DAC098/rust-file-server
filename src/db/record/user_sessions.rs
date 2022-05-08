@@ -1,9 +1,9 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Duration};
 use serde::Serialize;
 use tokio_postgres::GenericClient;
 use uuid::Uuid;
 
-use crate::http::error::Result;
+use crate::http::error::{Result, Error};
 
 #[derive(Serialize)]
 pub struct UserSession {
@@ -15,6 +15,25 @@ pub struct UserSession {
 }
 
 impl UserSession {
+
+    pub fn default_duration() -> Duration {
+        Duration::days(7)
+    }
+
+    pub fn new(users_id: i64, duration: &Duration) -> Result<UserSession> {
+        let issued_on = Utc::now();
+        let expires = issued_on.clone()
+            .checked_add_signed(duration.clone())
+            .ok_or(Error::default())?;
+
+        Ok(UserSession {
+            users_id,
+            token: Uuid::new_v4(),
+            dropped: false,
+            issued_on,
+            expires
+        })
+    }
 
     pub async fn find_token(conn: &impl GenericClient, token: &Uuid) -> Result<Option<UserSession>> {
         if let Some(record) = conn.query_opt(
@@ -61,4 +80,14 @@ impl UserSession {
             .collect())
     }
 
+    pub async fn insert(&self, conn: &impl GenericClient) -> Result<()> {
+        conn.execute(
+            "\
+            insert into user_sessions (users_id, token, dropped, issued_on, expires) values \
+            ($1, $2, $3, $4, $5)",
+            &[&self.users_id, &self.token, &self.dropped, &self.issued_on, &self.expires]
+        ).await?;
+
+        Ok(())
+    }
 }

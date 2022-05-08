@@ -59,9 +59,14 @@ pub struct SetCookie {
 }
 
 impl SetCookie {
-    pub fn new(key: String, value: String) -> SetCookie {
+    pub fn new<K,V>(key: K, value: V) -> SetCookie
+    where
+        K: Into<String>,
+        V: Into<String>
+    {
         SetCookie {
-            key, value,
+            key: key.into(), 
+            value: value.into(),
             expires: None,
             max_age: None,
             domain: None,

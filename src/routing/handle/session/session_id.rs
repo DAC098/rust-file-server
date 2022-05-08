@@ -50,7 +50,7 @@ pub async fn handle_delete(state: AppState, req: Request) -> Result<Response> {
                         &[session_id]
                     ).await?;
     
-                    let mut session_cookie = SetCookie::new("session_id".into(), session_id.to_string());
+                    let mut session_cookie = SetCookie::new("session_id", session_id.to_string());
                     session_cookie.max_age = Some(chrono::Duration::seconds(0));
                     session_cookie.same_site = Some(SameSite::Strict);
     

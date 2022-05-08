@@ -3,8 +3,6 @@ use hyper::{Body, header::SET_COOKIE};
 use serde::Deserialize;
 use tokio_postgres::GenericClient;
 
-pub mod session_id;
-
 use crate::{
     http::{
         Request,
@@ -49,21 +47,11 @@ async fn create_session(conn: &impl GenericClient, body: Body,) -> Result<Respon
             }
         }
 
-        let session_duration = chrono::Duration::days(7);
-        let token = uuid::Uuid::new_v4();
-        let issued_on = chrono::Utc::now();
-        let expires = issued_on.clone()
-            .checked_add_signed(session_duration.clone())
-            .ok_or(Error::new(500, "ServerError", "server error when creating user session"))?;
+        let session_duration = UserSession::default_duration();
+        let session_record = UserSession::new(user.id.clone(), &session_duration)?;
+        session_record.insert(conn).await?;
 
-        conn.execute(
-            "\
-            insert into user_sessions (users_id, token, issued_on, expires) values \
-            ($1, $2, $3, $4)",
-            &[&user.id, &token, &issued_on, &expires]
-        ).await?;
-
-        let mut session_cookie = SetCookie::new("session_id".into(), token.to_string());
+        let mut session_cookie = SetCookie::new("session_id", session_record.token.to_string());
         session_cookie.path = Some("/".into());
         session_cookie.max_age = Some(session_duration);
         session_cookie.same_site = Some(SameSite::Strict);
@@ -90,10 +78,9 @@ pub async fn handle_get(state: AppState, req: Request) -> Result<Response> {
     } else {
         let (user, _user_session) = session_check?;
 
-        let session_list = UserSession::find_users_id(&*conn, &user.id).await?;
-
         JsonResponseBuilder::new(200)
-            .payload_response(session_list)
+            .set_message("noop")
+            .response()
     }
 }
 
@@ -151,7 +138,7 @@ pub async fn handle_delete(state: AppState, req: Request) -> Result<Response> {
                         &[session_id]
                     ).await?;
     
-                    let mut session_cookie = SetCookie::new("session_id".into(), session_id.to_string());
+                    let mut session_cookie = SetCookie::new("session_id", session_id.to_string());
                     session_cookie.max_age = Some(chrono::Duration::seconds(0));
                     session_cookie.same_site = Some(SameSite::Strict);
     

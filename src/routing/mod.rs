@@ -22,7 +22,6 @@ use crate::state::AppState;
 use crate::http::error::{Error, Result};
 
 mod handle;
-// mod router;
 
 #[allow(dead_code)]
 #[inline]
@@ -96,12 +95,6 @@ impl Router {
                     Method::DELETE => handle::auth::session::handle_delete(state, req).await,
                     _ => Err(method_not_allowed())
                 }
-            } else if path.starts_with("/auth/session/") {
-                return match *method {
-                    Method::GET => handle::auth::session::session_id::handle_get(state, req).await,
-                    Method::DELETE => handle::auth::session::session_id::handle_delete(state, req).await,
-                    _ => Err(method_not_allowed())
-                }
             } else if path == "/auth/password" {
                 return match *method {
                     Method::POST => handle::auth::password::handle_post(state, req).await,
@@ -130,6 +123,20 @@ impl Router {
                 Method::POST => components::auth_wrapper(state, req, handle::listeners::handle_post).await,
                 Method::DELETE => components::auth_wrapper(state, req, handle::listeners::handle_delete).await,
                 _ => Err(method_not_allowed())
+            }
+        } else if path.starts_with("/session") {
+            if path == "/session" {
+                return match *method {
+                    Method::GET => okay_response(req),
+                    Method::DELETE => okay_response(req),
+                    _ => Err(method_not_allowed())
+                }
+            } else if path.starts_with("/session/") {
+                return match *method {
+                    Method::GET => handle::session::session_id::handle_get(state, req).await,
+                    Method::DELETE => handle::session::session_id::handle_delete(state, req).await,
+                    _ => Err(method_not_allowed())
+                }
             }
         }
 
