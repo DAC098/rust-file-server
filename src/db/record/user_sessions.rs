@@ -3,7 +3,10 @@ use serde::Serialize;
 use tokio_postgres::GenericClient;
 use uuid::Uuid;
 
-use crate::http::error::{Result, Error};
+use crate::{
+    http::error::{Result, Error}, 
+    db::query::QueryParams
+};
 
 #[derive(Serialize)]
 pub struct UserSession {
@@ -58,15 +61,23 @@ impl UserSession {
         }
     }
 
-    pub async fn find_users_id(conn: &impl GenericClient, users_id: &i64) -> Result<Vec<UserSession>> {
-        Ok(conn.query("\
+    pub async fn find_users_id(conn: &impl GenericClient, users_id: &i64, exclude_token: Option<&Uuid>) -> Result<Vec<UserSession>> {
+        let mut query_slice = QueryParams::with_capacity(2);
+        query_slice.push(users_id);
+
+        if let Some(token) = exclude_token {
+            query_slice.push(token);
+        }
+
+        Ok(conn.query(
+            "\
             select token, \
                    dropped, \
                    issued_on, \
                    expires \
             from user_sessions \
             where users_id = $1",
-            &[users_id]
+            query_slice.slice()
         )
             .await?
             .iter()

@@ -5,6 +5,7 @@ pub mod types;
 // pub mod error;
 mod shared_state;
 pub mod record;
+pub mod query;
 
 pub use shared_state::*;
 

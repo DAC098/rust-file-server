@@ -76,7 +76,7 @@ pub async fn handle_get(state: AppState, req: Request) -> Result<Response> {
             Err(_) => response_index_html_parts(state.template)
         }
     } else {
-        let (user, _user_session) = session_check?;
+        let (_user, _user_session) = session_check?;
 
         JsonResponseBuilder::new(200)
             .set_message("noop")

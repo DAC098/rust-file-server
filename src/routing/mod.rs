@@ -127,14 +127,13 @@ impl Router {
         } else if path.starts_with("/session") {
             if path == "/session" {
                 return match *method {
-                    Method::GET => okay_response(req),
-                    Method::DELETE => okay_response(req),
+                    Method::GET => components::html_wrapper(state, req, handle::session::handle_get).await,
+                    Method::DELETE => components::auth_wrapper(state, req, handle::session::handle_delete).await,
                     _ => Err(method_not_allowed())
                 }
             } else if path.starts_with("/session/") {
                 return match *method {
-                    Method::GET => handle::session::session_id::handle_get(state, req).await,
-                    Method::DELETE => handle::session::session_id::handle_delete(state, req).await,
+                    Method::DELETE => components::auth_wrapper(state, req, handle::session::session_id::handle_delete).await,
                     _ => Err(method_not_allowed())
                 }
             }
