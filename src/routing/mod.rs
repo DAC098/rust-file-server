@@ -17,9 +17,8 @@ use crate::http::header::copy_header_value;
 use crate::state::AppState;
 use crate::http::error::{Error, Result};
 
+// mod service;
 mod layer;
-// mod router;
-// mod endpoint;
 mod handle;
 
 #[inline]

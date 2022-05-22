@@ -15,6 +15,7 @@ use crate::http::{
     }
 };
 
+#[derive(Clone)]
 pub struct Endpoint<S> {
     map: HashMap<Method, S>
 }

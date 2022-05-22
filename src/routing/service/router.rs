@@ -73,15 +73,17 @@ impl<Req, Res, Err> Router<Req, Res, Err> {
         }
     }
 
-    pub fn insert<R>(
+    pub fn insert<R, S>(
         &mut self, 
         route: R, 
-        value: BoxCloneService<Req, Res, Err>
+        value: S,
     ) -> std::result::Result<(), matchit::InsertError>
     where
-        R: Into<String>
+        R: Into<String>,
+        S: Service<Req, Response = Res, Error = Err> + Clone + Send + 'static,
+        S::Future: Send + 'static,
     {
-        self.router.insert(route, value)
+        self.router.insert(route, BoxCloneService::new(value))
     }
 }
 
