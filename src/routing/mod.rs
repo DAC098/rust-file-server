@@ -17,6 +17,7 @@ use crate::http::header::copy_header_value;
 use crate::state::AppState;
 use crate::http::error::{Error, Result};
 
+mod params;
 // mod service;
 mod layer;
 mod handle;
@@ -26,95 +27,156 @@ fn method_not_allowed() -> Error {
     Error::new(405, "MethodNotAllowed", "requested method is not accepted by this resource")
 }
 
+fn join_iter<'a>(iter: &mut impl Iterator<Item = &'a str>) -> String {
+    let mut rtn = String::new();
+    let mut first = true;
+
+    for seg in iter {
+        if first {
+            first = false;
+
+            rtn.push_str(seg);
+        } else {
+            rtn.reserve(seg.len() + 1);
+            rtn.push('/');
+            rtn.push_str(seg)
+        }
+    }
+
+    rtn
+}
+
 pub struct Router {
     connection: IpAddr,
     state: AppState
 }
 
 impl Router {
-    async fn handle_route(state: AppState, req: Request) -> Result<Response> {
-        let path = req.uri().path();
-        let method = req.method();
+    async fn handle_route(state: AppState, mut req: Request) -> Result<Response> {
+        let method = req.method().clone();
+        let path = req.uri().path().to_owned();
+        let segments: Vec<&str> = path.strip_prefix("/").unwrap().split("/").collect();
+        let total_segments = segments.len();
+        let mut segments_iter = segments.into_iter();
 
-        if path.len() == 0 || path == "/" {
-            return match *method {
-                Method::GET => handle::handle_get(req).await,
-                _ => Err(method_not_allowed())
-            }
-        } else if path == "/ping" {
-            return match *method {
-                Method::GET => handle::ping::handle_get(req).await,
-                _ => Err(method_not_allowed())
-            }
-        } else if path.starts_with("/auth/") {
-            if path == "/auth/session" {
-                return match *method {
-                    Method::GET => handle::auth::session::handle_get(state, req).await,
-                    Method::POST => handle::auth::session::handle_post(state, req).await,
-                    Method::DELETE => handle::auth::session::handle_delete(state, req).await,
+        if let Some(first_seg) = segments_iter.next() {
+            if first_seg == "ping" && total_segments == 1 {
+                return match method {
+                    Method::GET => handle::ping::handle_get(req).await,
                     _ => Err(method_not_allowed())
                 }
-            } else if path == "/auth/password" {
-                return match *method {
-                    Method::POST => handle::auth::password::handle_post(state, req).await,
+            } else if first_seg == "users" {
+                if total_segments == 1 {
+                    return match method {
+                        Method::GET => okay_response(req),
+                        Method::POST => handle::admin::users::handle_post(state, req).await,
+                        Method::DELETE => okay_response(req),
+                        _ => Err(method_not_allowed())
+                    }
+                }
+
+                let mut params = params::Params::with([
+                    ("users_id".into(), segments_iter.next().unwrap().into())
+                ]);
+                
+                if total_segments == 2 {
+                    req.extensions_mut().insert(params);
+
+                    return match method {
+                        Method::GET => okay_response(req),
+                        Method::PUT => okay_response(req),
+                        Method::DELETE => okay_response(req),
+                        _ => Err(method_not_allowed())
+                    }
+                } else if let Some(third_seg) = segments_iter.next() {
+                    params.insert("context", join_iter(&mut segments_iter));
+
+                    req.extensions_mut().insert(params);
+
+                    if third_seg == "fs" {
+                        return match method {
+                            Method::GET => handle::fs::handle_get(state, req).await,
+                            Method::POST => handle::fs::handle_post(state, req).await,
+                            Method::PUT => handle::fs::handle_put(state, req).await,
+                            Method::DELETE => handle::fs::handle_delete(state, req).await,
+                            _ => Err(method_not_allowed())
+                        }
+                    } else if third_seg == "sync" {
+                        return match method {
+                            Method::PUT => handle::sync::handle_put(state, req).await,
+                            _ => Err(method_not_allowed())
+                        }
+                    }
+                }
+            } else if first_seg == "listeners" {
+                return match method {
+                    Method::GET => handle::listeners::handle_get(state, req).await,
+                    Method::POST => handle::listeners::handle_post(state, req).await,
+                    Method::DELETE => handle::listeners::handle_delete(state, req).await,
                     _ => Err(method_not_allowed())
                 }
-            }
-        } else if path.starts_with("/admin/") {
-            if path == "/admin/users" {
-                return match *method {
-                    Method::GET => okay_response(req),
-                    Method::POST => handle::admin::users::handle_post(state, req).await,
-                    Method::DELETE => okay_response(req),
-                    _ => Err(method_not_allowed())
+            } else if first_seg == "session" {
+                if total_segments == 1 {
+                    return match method {
+                        Method::GET => handle::session::handle_get(state, req).await,
+                        Method::DELETE => handle::session::handle_delete(state, req).await,
+                        _ => Err(method_not_allowed())
+                    }
                 }
-            } else if path.starts_with("/admin/users/") {
-                return match *method {
-                    Method::GET => okay_response(req),
-                    Method::PUT => okay_response(req),
-                    Method::DELETE => okay_response(req),
-                    _ => Err(method_not_allowed())
-                }
-            }
-        } else if path == "/listeners" {
-            return match *method {
-                Method::GET => handle::listeners::handle_get(state, req).await,
-                Method::POST => handle::listeners::handle_post(state, req).await,
-                Method::DELETE => handle::listeners::handle_delete(state, req).await,
-                _ => Err(method_not_allowed())
-            }
-        } else if path.starts_with("/session") {
-            if path == "/session" {
-                return match *method {
-                    Method::GET => handle::session::handle_get(state, req).await,
-                    Method::DELETE => handle::session::handle_delete(state, req).await,
-                    _ => Err(method_not_allowed())
-                }
-            } else if path.starts_with("/session/") {
-                return match *method {
+
+                req.extensions_mut().insert(params::Params::with([
+                    ("session_id".into(), segments_iter.next().unwrap().into())
+                ]));
+
+                return match method {
                     Method::DELETE => handle::session::session_id::handle_delete(state, req).await,
                     _ => Err(method_not_allowed())
                 }
-            }
-        }
+            } else if first_seg == "fs" {
+                req.extensions_mut().insert(params::Params::with([
+                    ("context".into(), join_iter(&mut segments_iter))
+                ]));
 
-        if let Some((action, item)) = path.strip_prefix("/").unwrap().split_once("/") {
-            match action {
-                "fs" => match *method {
+                return match method {
                     Method::GET => handle::fs::handle_get(state, req).await,
                     Method::POST => handle::fs::handle_post(state, req).await,
                     Method::PUT => handle::fs::handle_put(state, req).await,
                     Method::DELETE => handle::fs::handle_delete(state, req).await,
                     _ => Err(method_not_allowed())
-                },
-                "sync" => match *method {
+                }
+            } else if first_seg == "sync" {
+                req.extensions_mut().insert(params::Params::with([
+                    ("context".into(), join_iter(&mut segments_iter))
+                ]));
+
+                return match method {
                     Method::PUT => handle::sync::handle_put(state, req).await,
                     _ => Err(method_not_allowed())
-                },
-                _ => handle::_static_::handle_req(state, req).await
+                }
+            } else if first_seg == "auth" {
+                if let Some(second_seg) = segments_iter.next() {
+                    if second_seg == "session" {
+                        return match method {
+                            Method::GET => handle::auth::session::handle_get(state, req).await,
+                            Method::POST => handle::auth::session::handle_post(state, req).await,
+                            Method::DELETE => handle::auth::session::handle_delete(state, req).await,
+                            _ => Err(method_not_allowed())
+                        }
+                    } else if second_seg == "password" {
+                        return match method {
+                            Method::POST => handle::auth::password::handle_post(state, req).await,
+                            _ => Err(method_not_allowed())
+                        }
+                    }
+                }
             }
-        } else {
+
             handle::_static_::handle_req(state, req).await
+        } else {
+            match method {
+                Method::GET => handle::handle_get(req).await,
+                _ => Err(method_not_allowed())
+            }
         }
     }
 }

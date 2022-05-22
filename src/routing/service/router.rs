@@ -1,46 +1,12 @@
-use std::collections::HashMap;
-
 use futures::future::BoxFuture;
 use tower::{Service, util::BoxCloneService};
 
-pub struct RouterParams(HashMap<String, String>);
-
-impl RouterParams {
-
-    fn with_capacity(size: usize) -> RouterParams {
-        RouterParams(HashMap::with_capacity(size))
-    }
-
-    fn insert(&mut self, key: String, value: String) -> Option<String> {
-        self.0.insert(key, value)
-    }
-
-    pub fn has_key<'a, K>(&self, key: K) -> bool
-    where
-        K: Into<&'a String>
-    {
-        self.0.contains_key(key.into())
-    }
-
-    pub fn get_value<'a, K>(&self, key: K) -> Option<String>
-    where
-        K: Into<&'a String>
-    {
-        self.0.get(key.into()).map(|v| v.clone())
-    }
-
-    pub fn get_value_ref<'a, K>(&self, key: K) -> Option<&String>
-    where
-        K: Into<&'a String>
-    {
-        self.0.get(key.into())
-    }
-}
+use crate::routing::params::Params;
 
 pub trait RouterExt {
     fn get_path(&self) -> String;
 
-    fn add_params(&mut self, params: RouterParams) -> ();
+    fn add_params(&mut self, params: Params) -> ();
 }
 
 impl<B> RouterExt for hyper::Request<B>
@@ -51,7 +17,7 @@ where
         self.uri().path().into()
     }
 
-    fn add_params(&mut self, params: RouterParams) -> () {
+    fn add_params(&mut self, params: Params) -> () {
         self.extensions_mut().insert(params);
     }
 }
@@ -104,7 +70,7 @@ where
         let result = self.router.at_mut(path.as_str());
 
         if let Ok(matches) = result {
-            let mut map = RouterParams::with_capacity(matches.params.len());
+            let mut map = Params::with_capacity(matches.params.len());
 
             for (key, value) in matches.params.iter() {
                 map.insert(key.to_owned(), value.to_owned());
