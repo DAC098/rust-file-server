@@ -2,19 +2,23 @@ use chrono::Utc;
 use serde_json::json;
 use tokio::fs::create_dir;
 
-use crate::components::auth::SessionTuple;
+use crate::components::auth::require_session;
 use crate::components::fs_items::new_resource;
 use crate::db::record::{FsItem, FsItemType};
 use crate::event;
 use crate::http::body::file_from_body;
 use crate::http::response::JsonResponseBuilder;
 use crate::http::uri::QueryMap;
-use crate::http::{Response, RequestTuple};
+use crate::http::{Response, Request};
 use crate::http::error::{Error, Result};
 use crate::state::AppState;
 
-pub async fn handle_post(state: AppState, (head, body): RequestTuple, (user, _): SessionTuple, context: String) -> Result<Response> {
+pub async fn handle_post(state: AppState, req: Request) -> Result<Response> {
+    let (head, body) = req.into_parts();
     let mut conn = state.db.pool.get().await?;
+    let (user, _) = require_session(&*conn, &head.headers).await?;
+
+    let context = String::new();
 
     let (parent, basename) = new_resource(&*conn, &user, &context).await?;
 

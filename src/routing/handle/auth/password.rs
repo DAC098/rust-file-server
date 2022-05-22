@@ -15,7 +15,7 @@ use crate::{
     },
     security::argon::hash_with_default,
     state::AppState,
-    components::auth::{get_session, verify_totp_code}, 
+    components::auth::{verify_totp_code, require_session}, 
     db::record::UserSession
 };
 
@@ -29,7 +29,7 @@ pub struct PasswordJson {
 pub async fn handle_post(state: AppState, req: Request) -> Result<Response> {
     let (head, body) = req.into_parts();
     let mut conn = state.db.pool.get().await?;
-    let (user, _) = get_session(&head.headers, &*conn).await?;
+    let (user, _) = require_session(&*conn, &head.headers).await?;
 
     let json: PasswordJson = json_from_body(body).await?;
 

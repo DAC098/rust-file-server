@@ -2,17 +2,19 @@ use uuid::Uuid;
 
 use crate::{
     http::{
-        error::{Result, Error},
+        Request,
         Response,
+        error::{Result, Error},
         response::JsonResponseBuilder,
-        RequestTuple
     },
-    components::auth::SessionTuple,
+    components::auth::require_session,
     state::AppState
 };
 
-pub async fn handle_delete(state: AppState, (head, _body): RequestTuple, (user, session): SessionTuple) -> Result<Response> {
-    let mut path_split = head.uri.path().split('/');
+pub async fn handle_delete(state: AppState, req: Request) -> Result<Response> {
+    let conn = state.db.pool.get().await?;
+    let (user, session) = require_session(&*conn, req.headers()).await?;
+    let mut path_split = req.uri().path().split('/');
     path_split.next();
 
     let token: Uuid;
@@ -30,8 +32,6 @@ pub async fn handle_delete(state: AppState, (head, _body): RequestTuple, (user, 
     if token == session.token {
         return Err(Error::new(400, "InvalidSessionId", "cannot delete your active session id"));
     }
-
-    let conn = state.db.pool.get().await?;
 
     let result = conn.execute(
         "delete from user_session where users_id = $1 and token = $2",

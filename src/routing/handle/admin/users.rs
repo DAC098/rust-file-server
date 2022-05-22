@@ -1,7 +1,22 @@
 use serde::Deserialize;
 use tokio::fs::create_dir;
 
-use crate::{http::{Request, Response, error::{Result, Error}, body::json_from_body, response::JsonResponseBuilder}, db::record::{User, FsItemType}, components::auth::get_session, security::argon::hash_with_default, state::AppState};
+use crate::{
+    http::{
+        Request,
+        Response,
+        error::{Result, Error},
+        body::json_from_body,
+        response::JsonResponseBuilder
+    },
+    db::record::{
+        User,
+        FsItemType
+    },
+    components::auth::require_session,
+    security::argon::hash_with_default,
+    state::AppState
+};
 
 #[derive(Deserialize)]
 struct NewUserJson {
@@ -11,9 +26,9 @@ struct NewUserJson {
 }
 
 pub async fn handle_post(app: AppState, req: Request) -> Result<Response> {
-    let (head, body) = req.into_parts();
     let mut conn = app.db.pool.get().await?;
-    let (_user, _session) = get_session(&head.headers, &*conn).await?;
+    let (head, body) = req.into_parts();
+    let (_,_) = require_session(&*conn, &head.headers).await?;
     let new_user: NewUserJson = json_from_body(body).await?;
 
     let existing = User::find_username_or_optional_email(&*conn, &new_user.username, &new_user.email).await?;

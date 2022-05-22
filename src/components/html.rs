@@ -3,7 +3,14 @@ use std::str::FromStr;
 use hyper::HeaderMap;
 use serde_json::json;
 
-use crate::{http::{error::{Result, Error}, Response, response::build}, template::ArcTemplateState};
+use crate::{
+    http::{
+        error::{Result, Error}, 
+        Response, 
+        response::build
+    }, 
+    template::ArcTemplateState
+};
 
 pub fn check_if_html_headers(headers: &HeaderMap) -> Result<bool> {
     if let Some(value) = headers.get("accept") {
@@ -13,7 +20,7 @@ pub fn check_if_html_headers(headers: &HeaderMap) -> Result<bool> {
                     return Ok(true)
                 }
             } else {
-                return Err(Error::new(400, "InvalidAcceptHeader", "given failed to parse given accept header value"));
+                return Err(Error::new(400, "InvalidAcceptHeader", "failed to parse given accept header value"));
             }
         }
     }

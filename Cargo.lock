@@ -642,43 +642,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "image-server"
-version = "0.1.0"
-dependencies = [
- "bb8",
- "bb8-postgres",
- "chrono",
- "env_logger",
- "futures",
- "handlebars",
- "hyper",
- "jsonwebtoken",
- "lazy_static",
- "lib",
- "log",
- "mime",
- "notify",
- "num_cpus",
- "otp",
- "regex",
- "reqwest",
- "ring",
- "rust-argon2",
- "serde",
- "serde_json",
- "serde_repr",
- "serde_yaml",
- "shape-rs",
- "tokio",
- "tokio-postgres",
- "tokio-tar",
- "tokio-util",
- "tower",
- "urlencoding",
- "uuid",
-]
-
-[[package]]
 name = "indexmap"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -833,6 +796,12 @@ name = "matches"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3e378b66a060d48947b590737b30a1be76706c8dd7b8ba0f2fe3989c68a853f"
+
+[[package]]
+name = "matchit"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73cbba799671b762df5a175adf59ce145165747bb891505c43d09aefbbf38beb"
 
 [[package]]
 name = "md-5"
@@ -1378,6 +1347,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-file-server"
+version = "0.1.0"
+dependencies = [
+ "bb8",
+ "bb8-postgres",
+ "chrono",
+ "env_logger",
+ "futures",
+ "handlebars",
+ "hyper",
+ "jsonwebtoken",
+ "lazy_static",
+ "lib",
+ "log",
+ "matchit",
+ "mime",
+ "notify",
+ "num_cpus",
+ "otp",
+ "regex",
+ "reqwest",
+ "ring",
+ "rust-argon2",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "serde_yaml",
+ "shape-rs",
+ "tokio",
+ "tokio-postgres",
+ "tokio-tar",
+ "tokio-util",
+ "tower",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
 name = "ryu"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1762,11 +1769,12 @@ dependencies = [
 
 [[package]]
 name = "tower"
-version = "0.4.10"
+version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c00e500fff5fa1131c866b246041a6bf96da9c965f8fe4128cb1421f23e93c00"
+checksum = "9a89fd63ad6adf737582df5db40d286574513c69a11dac5214dc3b5603d6713e"
 dependencies = [
  "futures-core",
+ "futures-util",
  "pin-project",
  "pin-project-lite",
  "tower-layer",
@@ -1795,19 +1803,7 @@ dependencies = [
  "cfg-if",
  "log",
  "pin-project-lite",
- "tracing-attributes",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-attributes"
-version = "0.1.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4f480b8f81512e825f337ad51e94c1eb5d3bbdf2b363dcd01e2b19a9ffe3f8e"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

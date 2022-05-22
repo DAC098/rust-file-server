@@ -1,3 +1,5 @@
+use std::option::Option;
+
 use chrono::Utc;
 use hyper::{HeaderMap, Uri};
 use tokio_postgres::GenericClient;
@@ -10,9 +12,94 @@ use crate::{
     db::record::{User, UserSession, TotpAlgorithm}
 };
 
-pub type SessionTuple = (User, UserSession);
+/*
+pub struct SessionTuple (User, UserSession);
 
-pub async fn get_session(headers: &HeaderMap, conn: &impl GenericClient) -> Result<SessionTuple> {
+impl SessionTuple {
+
+    pub fn try_from(req: &mut Request) -> Result<SessionTuple> {
+        if let Some(ext) = req.extensions_mut().remove::<Option<SessionTuple>>() {
+            if let Some(tuple) = ext {
+                Ok(tuple)
+            } else {
+                Err(Error::new(401, "NoSession", "no session is available"))
+            }
+        } else {
+            panic!("no session tuple is present in the request extension");
+        }
+    }
+
+    pub fn try_from_user(req: &mut Request) -> Result<User> {
+        if let Some(ext) = req.extensions_mut().remove::<Option<SessionTuple>>() {
+            if let Some(tuple) = ext {
+                Ok(tuple.0)
+            } else {
+                Err(Error::new(401, "NoSession", "no session is available"))
+            }
+        } else {
+            panic!("no session tuple is present in the request extension");
+        }
+    }
+
+    pub fn try_from_session(req: &mut Request) -> Result<UserSession> {
+        if let Some(ext) = req.extensions_mut().remove::<Option<SessionTuple>>() {
+            if let Some(tuple) = ext {
+                Ok(tuple.1)
+            } else {
+                Err(Error::new(401, "NoSession", "no session is available"))
+            }
+        } else {
+            panic!("no session tuple is present in the request extension");
+        }
+    }
+
+    pub fn option_try_from(req: &mut Request) -> Option<SessionTuple> {
+        if let Some(ext) = req.extensions_mut().remove() {
+            ext
+        } else {
+            panic!("no session tuple is present in the request extension");
+        }
+    }
+
+    pub fn option_try_from_user(req: &mut Request) -> Option<User> {
+        if let Some(ext) = req.extensions_mut().remove::<Option<SessionTuple>>() {
+            if let Some(tuple) = ext {
+                Some(tuple.0)
+            } else {
+                None
+            }
+        } else {
+            panic!("no session tuple is present in the request extension");
+        }
+    }
+
+    pub fn option_try_from_user_session(req: &mut Request) -> Option<UserSession> {
+        if let Some(ext) = req.extensions_mut().remove::<Option<SessionTuple>>() {
+            if let Some(tuple) = ext {
+                Some(tuple.1)
+            } else {
+                None
+            }
+        } else {
+            panic!("no session tuple is present in the request extension");
+        }
+    }
+
+    pub fn into_tuple(self) -> (User, UserSession) {
+        (self.0, self.1)
+    }
+
+    pub fn into_user(self) -> User {
+        self.0
+    }
+
+    pub fn into_session(self) -> UserSession {
+        self.1
+    }
+}
+*/
+
+pub async fn get_session(conn: &impl GenericClient, headers: &HeaderMap) -> Result<Option<(User, UserSession)>> {
     if let Some(_auth) = headers.get("authorization") {
         // do something
         return Err(Error::new(400, "NotImplemented", "bot sessions are not currently enabled"));
@@ -26,22 +113,29 @@ pub async fn get_session(headers: &HeaderMap, conn: &impl GenericClient) -> Resu
                     let now = Utc::now();
 
                     if session.dropped || session.expires < now {
-                        Err(Error::new(401, "SessionEnded", "this session has been dropped or expired"))
+                        Ok(None)
                     } else {
-                        Ok((
-                            User::find_id(conn, &session.users_id).await?.unwrap(),
-                            session
-                        ))
+                        let user = User::find_id(conn, &session.users_id).await?.unwrap();
+
+                        Ok(Some((user, session)))
                     }
                 } else {
-                    Err(Error::new(404, "SessionNotFound", "given session id cannot be found"))
+                    Ok(None)
                 }
             } else {
                 Err(Error::new(400, "InvalidSessionId", "given session id cannot be parsed"))
             }
         } else {
-            Err(Error::new(400, "NoSessionIdGiven", "no session id was given"))
+            Ok(None)
         }
+    }
+}
+
+pub async fn require_session(conn: &impl GenericClient, headers: &HeaderMap) -> Result<(User, UserSession)> {
+    if let Some(tuple) = get_session(conn, headers).await? {
+        Ok(tuple)
+    } else {
+        Err(Error::new(401, "NoSession", "no session is available"))
     }
 }
 
@@ -50,11 +144,11 @@ pub fn login_redirect_path(path: &str) -> Result<Response> {
     redirect_response(&redirect_path)
 }
 
-pub fn login_redirect(current: &Uri) -> Result<Response> {
-    let redirect_path = if let Some(pq) = current.path_and_query() {
+pub fn login_redirect(uri: &Uri) -> Result<Response> {
+    let redirect_path = if let Some(pq) = uri.path_and_query() {
         pq.as_str()
     } else {
-        current.path()
+        uri.path()
     };
 
     login_redirect_path(&redirect_path)

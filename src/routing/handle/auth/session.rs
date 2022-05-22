@@ -19,7 +19,7 @@ use crate::{
             response_index_html_parts,
             check_if_html_headers
         }, 
-        auth::{get_session, verify_totp_code}
+        auth::{verify_totp_code, require_session}
     }, 
     state::AppState
 };
@@ -68,7 +68,7 @@ async fn create_session(conn: &impl GenericClient, body: Body,) -> Result<Respon
 pub async fn handle_get(state: AppState, req: Request) -> Result<Response> {
     let (head, _) = req.into_parts();
     let conn = state.db.pool.get().await?;
-    let session_check = get_session(&head.headers, &*conn).await;
+    let session_check = require_session(&*conn, &head.headers).await;
 
     if check_if_html_headers(&head.headers)? {
         match session_check {
@@ -76,7 +76,7 @@ pub async fn handle_get(state: AppState, req: Request) -> Result<Response> {
             Err(_) => response_index_html_parts(state.template)
         }
     } else {
-        let (_user, _user_session) = session_check?;
+        session_check?;
 
         JsonResponseBuilder::new(200)
             .set_message("noop")
@@ -137,22 +137,18 @@ pub async fn handle_delete(state: AppState, req: Request) -> Result<Response> {
                         "update user_sessions set dropped = true where token = $1",
                         &[session_id]
                     ).await?;
-    
-                    let mut session_cookie = SetCookie::new("session_id", session_id.to_string());
-                    session_cookie.max_age = Some(chrono::Duration::seconds(0));
-                    session_cookie.same_site = Some(SameSite::Strict);
-    
-                    JsonResponseBuilder::new(200)
-                        .add_header(SET_COOKIE, session_cookie)
-                        .response()
-                } else {
-                    Err(Error::new(404, "SessionNotFound", "given session id cannot be found"))
                 }
             } else {
-                Err(Error::new(400, "InvalidSessionId", "given session id cannot be parsed"))
+                return Err(Error::new(400, "InvalidSessionId", "given session id cannot be parsed"))
             }
-        } else {
-            Err(Error::new(400, "NoSessionIdGiven", "no session id was given"))
         }
     }
+
+    let mut session_cookie = SetCookie::new("session_id", "");
+    session_cookie.max_age = Some(chrono::Duration::seconds(0));
+    session_cookie.same_site = Some(SameSite::Strict);
+
+    JsonResponseBuilder::new(200)
+        .add_header(SET_COOKIE, session_cookie)
+        .response()
 }

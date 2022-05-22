@@ -2,13 +2,14 @@ use tokio::fs::File as TokioFile;
 use tokio_util::codec::{FramedRead, BytesCodec};
 use hyper::Body;
 
-use crate::components::auth::SessionTuple;
+use crate::components::auth::{require_session, login_redirect};
 use crate::components::fs_items::existing_resource;
+use crate::components::html::{check_if_html_headers, response_index_html_parts};
 use crate::db::record::{FsItem, FsItemType, User};
 use crate::db::types::PoolConn;
 use crate::http::response::JsonResponseBuilder;
 use crate::http::uri::QueryMap;
-use crate::http::{Response, RequestTuple};
+use crate::http::{Response, Request};
 use crate::http::error::{Error, Result};
 use crate::http::{mime, response};
 use crate::state::AppState;
@@ -86,9 +87,21 @@ async fn handle_get_download(state: &AppState, conn: &PoolConn<'_>, query_map: Q
     }
 }
 
-pub async fn handle_get(state: AppState, (head, _): RequestTuple, (user, _): SessionTuple, context: String) -> Result<Response> {
+pub async fn handle_get(state: AppState, req: Request) -> Result<Response> {
     let conn = state.db.pool.get().await?;
-    let query_map = QueryMap::new(&head.uri);
+    let session_tuple = require_session(&*conn, req.headers()).await;
+
+    if check_if_html_headers(req.headers())? {
+        return match session_tuple {
+            Ok(_) => response_index_html_parts(state.template),
+            Err(_) => login_redirect(req.uri())
+        }
+    }
+
+    let (user, _) = session_tuple?;
+    let query_map = QueryMap::new(req.uri());
+
+    let context = String::new();
 
     if let Some(fs_item) = existing_resource(&*conn, &user, &context).await? {
         if fs_item.users_id != user.id {

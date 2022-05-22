@@ -2,14 +2,14 @@ use chrono::Utc;
 use serde_json::Value as JsonValue;
 use hyper::Body;
 
-use crate::components::auth::SessionTuple;
+use crate::components::auth::require_session;
 use crate::components::fs_items::existing_resource;
 use crate::db::record::{FsItem, FsItemType};
 use crate::db::types::PoolConn;
 use crate::event;
 use crate::http::body::{json_from_body, file_from_body};
 use crate::http::response::JsonResponseBuilder;
-use crate::http::{Response, RequestTuple};
+use crate::http::{Response, Request};
 use crate::http::error::{Error, Result};
 use crate::http::uri;
 use crate::state::AppState;
@@ -73,8 +73,12 @@ async fn handle_put_user_data_action(state: &AppState, conn: PoolConn<'_>, mut f
         .payload_response(fs_item)
 }
 
-pub async fn handle_put(state: AppState, (head, body): RequestTuple, (user, _): SessionTuple, context: String) -> Result<Response> {
+pub async fn handle_put(state: AppState, req: Request) -> Result<Response> {
+    let (head, body) = req.into_parts();
     let conn = state.db.pool.get().await?;
+    let (user, _) = require_session(&*conn, &head.headers).await?;
+
+    let context = String::new();
 
     if let Some(fs_item) = existing_resource(&*conn, &user, &context).await? {
         if fs_item.users_id != user.id {

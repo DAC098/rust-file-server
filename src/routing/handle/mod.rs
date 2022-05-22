@@ -11,19 +11,19 @@ pub mod sync;
 pub mod listeners;
 pub mod _static_;
 
-pub async fn handle_get(state: AppState, req: Request) -> Result<Response> {
+pub async fn handle_get(mut req: Request) -> Result<Response> {
+    let state = AppState::from(&mut req);
     let (head, _) = req.into_parts();
     let conn = state.db.pool.get().await?;
-    let session = get_session(&head.headers, &*conn).await;
+    let session = get_session(&*conn, &head.headers).await?;
 
     if check_if_html_headers(&head.headers)? {
-        match session {
-            Ok(_) => redirect_response("/fs/"),
-            Err(_) => redirect_response("/auth/session")
+        if session.is_some() {
+            redirect_response("/fs/")
+        } else {
+            redirect_response("/auth/session")
         }
     } else {
-        session?;
-
         JsonResponseBuilder::new(200)
             .response()
     }

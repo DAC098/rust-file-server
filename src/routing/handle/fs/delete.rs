@@ -4,17 +4,19 @@ use std::io::ErrorKind;
 use futures::{pin_mut, TryStreamExt};
 use tokio::fs::{remove_file, remove_dir};
 
-use crate::components::auth::SessionTuple;
+use crate::components::auth::require_session;
 use crate::components::fs_items::existing_resource;
 use crate::db::record::FsItemType;
 use crate::event;
 use crate::http::response::JsonResponseBuilder;
-use crate::http::{Response, RequestTuple};
+use crate::http::{Response, Request};
 use crate::http::error::{Error, Result};
 use crate::state::AppState;
 
-pub async fn handle_delete(state: AppState, (_, _): RequestTuple, (user, _): SessionTuple, context: String) -> Result<Response> {
+pub async fn handle_delete(state: AppState, req: Request) -> Result<Response> {
     let mut conn = state.db.pool.get().await?;
+    let (user, _) = require_session(&*conn, req.headers()).await?;
+    let context = String::new();
 
     if let Some(fs_item) = existing_resource(&*conn, &user, &context).await? {
         if fs_item.is_root {

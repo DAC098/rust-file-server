@@ -5,17 +5,32 @@ use serde_json::json;
 use tokio::fs::{ReadDir, read_dir, metadata};
 use tokio_postgres::GenericClient;
 
-use crate::{state::AppState, http::{Request, Response, error::{Result, Error}, response::JsonResponseBuilder}, components::{auth::get_session, fs_items::existing_resource}, db::record::{FsItem, FsItemType}, event};
+use crate::{
+    state::AppState, 
+    http::{
+        Request, 
+        Response, 
+        error::{Result, Error}, 
+        response::JsonResponseBuilder
+    }, 
+    components::{
+        auth::require_session, 
+        fs_items::existing_resource
+    }, 
+    db::record::{FsItem, FsItemType}, 
+    event
+};
 
 struct WorkItem {
     iter: ReadDir,
     id: i64
 }
 
-pub async fn handle_put(state: AppState, req: Request, context: String) -> Result<Response> {
-    let (head, _) = req.into_parts();
+pub async fn handle_put(state: AppState, req: Request) -> Result<Response> {
     let mut conn = state.db.pool.get().await?;
-    let (user, _) = get_session(&head.headers, &*conn).await?;
+    let (user, _) = require_session(&*conn, req.headers()).await?;
+
+    let context = String::new();
 
     if let Some(fs_item) = existing_resource(&*conn, &user, &context).await? {
         let mut created_items: u64 = 0;

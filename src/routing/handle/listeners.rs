@@ -1,14 +1,36 @@
-use std::error::Error as StdError;
+use std::{error::Error as StdError};
 
 use futures::{stream::FuturesOrdered, StreamExt};
 use hyper::Uri;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::{http::{error::Error, error::Result, Response, response::JsonResponseBuilder, body::json_from_body, RequestTuple}, state::AppState, components::auth::SessionTuple, db::record::EventListener, event};
+use crate::{
+    http::{
+        Request,
+        Response,
+        error::{Error, Result},
+        response::JsonResponseBuilder,
+        body::json_from_body,
+    }, 
+    state::AppState,
+    components::{auth::{require_session, login_redirect}, html::{check_if_html_headers, response_index_html_parts}}, 
+    db::record::EventListener, 
+    event
+};
 
-pub async fn handle_get(state: AppState, (_, _): RequestTuple, (user, _): SessionTuple) -> Result<Response> {
+pub async fn handle_get(state: AppState, req: Request) -> Result<Response> {
     let conn = state.db.pool.get().await?;
+    let session_check = require_session(&*conn, req.headers()).await;
+
+    if check_if_html_headers(req.headers())? {
+        return match session_check {
+            Ok(_) => response_index_html_parts(state.template),
+            Err(_) => login_redirect(req.uri())
+        }
+    }
+
+    let (user, _) = session_check?;
 
     JsonResponseBuilder::new(200)
         .payload_response(EventListener::find_user_id(&*conn, &user.id).await?)
@@ -62,8 +84,11 @@ fn check_uri(endpoint: String, uri: Uri) -> std::result::Result<(), InvalidEndpo
     Ok(())
 }
 
-pub async fn handle_post(state: AppState, (_, body): RequestTuple, (user, _): SessionTuple) -> Result<Response> {
+pub async fn handle_post(state: AppState, req: Request) -> Result<Response> {
     let mut conn = state.db.pool.get().await?;
+    let (user, _) = require_session(&*conn, req.headers()).await?;
+    let body = req.into_body();
+
     let new_listeners: Vec<NewEventListener> = json_from_body(body).await?;
     let mut invalid_event_name: Vec<InvalidEventName> = Vec::with_capacity(new_listeners.len());
     let mut invalid_endpoint: Vec<InvalidEndpoint> = Vec::with_capacity(new_listeners.len());
@@ -172,8 +197,10 @@ pub async fn handle_post(state: AppState, (_, body): RequestTuple, (user, _): Se
     JsonResponseBuilder::new(200).payload_response(to_create)
 }
 
-pub async fn handle_delete(state: AppState, (_, body): RequestTuple, (user, _): SessionTuple) -> Result<Response> {
+pub async fn handle_delete(state: AppState, req: Request) -> Result<Response> {
     let mut conn = state.db.pool.get().await?;
+    let (user, _) = require_session(&*conn, req.headers()).await?;
+    let body = req.into_body();
     let mut failed = false;
     let id_list: Vec<uuid::Uuid> = json_from_body(body).await?;
     let mut unknown = Vec::with_capacity(id_list.len());

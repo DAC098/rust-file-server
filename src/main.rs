@@ -111,7 +111,7 @@ async fn main_runtime(conf: config::ServerConfig, rt_handle: Handle) -> error::R
 }
 
 async fn make_server(
-    addr: std::net::SocketAddr, 
+    addr: std::net::SocketAddr,
     router: routing::MakeRouter,
 ) -> error::Result<()> {
     let svc = tower::ServiceBuilder::new()
