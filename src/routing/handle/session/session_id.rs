@@ -8,18 +8,16 @@ use crate::{
         response::JsonResponseBuilder,
     },
     components::auth::require_session,
-    state::AppState
+    state::AppState, routing::Params
 };
 
-pub async fn handle_delete(state: AppState, req: Request) -> Result<Response> {
+pub async fn handle_delete(state: AppState, mut req: Request) -> Result<Response> {
+    let params = req.extensions_mut().remove::<Params>().unwrap();
     let conn = state.db.pool.get().await?;
     let (user, session) = require_session(&*conn, req.headers()).await?;
-    let mut path_split = req.uri().path().split('/');
-    path_split.next();
-
     let token: Uuid;
 
-    if let Some(given) = path_split.next() {
+    if let Some(given) = params.get_value_ref("session_id") {
         if let Ok(parsed) = given.parse() {
             token = parsed;
         } else {

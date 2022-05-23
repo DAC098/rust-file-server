@@ -1,79 +1,94 @@
 use tokio_postgres::GenericClient;
 
-use crate::{db::record::{User, FsItem}, http::error::{Result, Error}};
+use crate::{db::record::FsItem, http::{error::{Result, Error}, uri::QueryMap}};
 
-#[derive(Debug)]
-pub enum ContextType {
-    Id(i64),
-    Path(String)
-}
+pub fn validate_basename(basename: &str) -> Result<String> {
+    let trim = basename.trim();
 
-pub fn validate_basename(mut basename: String) -> Result<String> {
-    basename = basename.trim().to_owned();
-
-    if basename.is_empty() {
+    if trim.is_empty() {
         return Err(Error::new(400, "InvalidBasename", "basename caonnot be empty and leading/trailing whitespace will be removed"))
     }
 
-    Ok(basename)
+    Ok(trim.to_owned())
 }
 
-pub fn join_id_and_path(users_id: &i64, context: &str) -> String {
-    let id_str = users_id.to_string();
-
-    if context.len() == 0 {
-        id_str
-    } else {
-        let mut rtn = String::with_capacity(id_str.len() + 1 + context.len());
-        rtn.push_str(&id_str);
-        rtn.push('/');
-        rtn.push_str(context);
-        rtn
-    }
-}
-
-pub fn existing_context(user: &User, context: &str) -> ContextType {
-    if let Ok(id) = context.parse::<i64>() {
-        ContextType::Id(id)
-    } else {
-        ContextType::Path(join_id_and_path(&user.id, context))
-    }
-}
-
-pub fn new_context(user: &User, context: &str) -> (ContextType, String) {
+pub fn parse_new_context<'a>(context: &'a str) -> (&'a str, Option<&'a str>) {
     if let Some((parent, basename)) = context.rsplit_once('/') {
-        (existing_context(user, parent), basename.into())
+        (basename, Some(parent))
     } else {
-        (existing_context(user, ""), context.into())
+        (context, None)
     }
 }
 
-pub async fn existing_resource(conn: &impl GenericClient, user: &User, context: &str) -> Result<Option<FsItem>> {
-    match existing_context(user, context) {
-        ContextType::Id(id) => {
-            FsItem::find_id(conn, &id).await
-        },
-        ContextType::Path(path) => {
-            FsItem::find_path(conn, &user.id, &path).await
+pub struct SearchOptions {
+    pub users_id: i64,
+    pub is_path: Option<bool>
+}
+
+impl SearchOptions {
+
+    pub fn new(users_id: i64) -> Self {
+        SearchOptions { users_id, is_path: None }
+    }
+
+    pub fn pull_from_query_map(&mut self, query_map: &QueryMap) -> Result<()> {
+        if let Some(is_path) = query_map.get_value_ref("is_path") {
+            if let Some(value) = is_path {
+                self.is_path = Some(value == "1");
+            } else {
+                self.is_path = Some(true)
+            }
         }
+
+        if let Some(users_id) = query_map.get_value_ref("users_id") {
+            if let Some(value) = users_id {
+                if let Ok(p) = value.parse() {
+                    self.users_id = p;
+                } else {
+                    return Err(Error::new(400, "InvalidId", "given users id is not a valid integer"))
+                }
+            } else {
+                return Err(Error::new(400, "InvalidId", "no users id was specified"))
+            }
+        }
+
+        Ok(())
     }
 }
 
-pub async fn new_resource(conn: &impl GenericClient, user: &User, context: &str) -> Result<(Option<FsItem>, String)> {
-    let (existing, mut basename) = new_context(user, context);
-
-    basename = validate_basename(basename)?;
-
-    match existing {
-        ContextType::Id(id) => {
+pub async fn existing_resource(conn: &impl GenericClient, context: &str, options: SearchOptions) -> Result<Option<FsItem>> {
+    if let Some(is_path) = options.is_path {
+        if is_path {
+            FsItem::find_path(conn, &options.users_id, context).await
+        } else {
+            if let Ok(id) = context.parse::<i64>() {
+                FsItem::find_id(conn, &id).await
+            } else {
+                Err(Error::new(400, "InvalidId", "given context id is not a valid integer"))
+            }
+        }
+    } else {
+        if let Ok(id) = context.parse::<i64>() {
             let record = FsItem::find_id(conn, &id).await?;
-
-            Ok((record, basename))
-        },
-        ContextType::Path(path) => {
-            let record = FsItem::find_path(conn, &user.id, &path).await?;
-
-            Ok((record, basename))
+    
+            if record.is_some() {
+                return Ok(record)
+            }
         }
+
+        FsItem::find_path(conn, &options.users_id, context).await
     }
+}
+
+pub async fn new_resource(conn: &impl GenericClient, context: &str, options: SearchOptions) -> Result<(Option<FsItem>, String)> {
+    let fallback_context = "";
+    let (basename, existing) = parse_new_context(context);
+    let valid = validate_basename(basename)?;
+    let record = existing_resource(
+        conn, 
+        existing.unwrap_or(fallback_context), 
+        options
+    ).await?;
+
+    Ok((record, valid))
 }

@@ -3,8 +3,8 @@ use crate::{http::{Request, error::Result, Response, response::{redirect_respons
 pub mod ping;
 
 pub mod auth;
-pub mod admin;
 
+pub mod users;
 pub mod session;
 pub mod fs;
 pub mod sync;

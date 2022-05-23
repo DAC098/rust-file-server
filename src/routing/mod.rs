@@ -12,12 +12,13 @@ use tower::ServiceBuilder;
 
 use crate::http::Request;
 use crate::http::Response;
-use crate::http::response::okay_response;
+use crate::http::response::{okay_response, JsonResponseBuilder};
 use crate::http::header::copy_header_value;
 use crate::state::AppState;
 use crate::http::error::{Error, Result};
 
 mod params;
+pub use params::Params;
 // mod service;
 mod layer;
 mod handle;
@@ -46,6 +47,15 @@ fn join_iter<'a>(iter: &mut impl Iterator<Item = &'a str>) -> String {
     rtn
 }
 
+#[allow(dead_code)]
+pub fn testing_response(req: Request) -> Result<Response> {
+    log::debug!("params: {:#?}", req.extensions().get::<params::Params>());
+
+    JsonResponseBuilder::new(200)
+        .set_message("testing response")
+        .response()
+}
+
 pub struct Router {
     connection: IpAddr,
     state: AppState
@@ -60,7 +70,12 @@ impl Router {
         let mut segments_iter = segments.into_iter();
 
         if let Some(first_seg) = segments_iter.next() {
-            if first_seg == "ping" && total_segments == 1 {
+            if first_seg == "" && total_segments == 1 {
+                return match method {
+                    Method::GET => handle::handle_get(req).await,
+                    _ => Err(method_not_allowed())
+                }
+            } else if first_seg == "ping" && total_segments == 1 {
                 return match method {
                     Method::GET => handle::ping::handle_get(req).await,
                     _ => Err(method_not_allowed())
@@ -69,16 +84,16 @@ impl Router {
                 if total_segments == 1 {
                     return match method {
                         Method::GET => okay_response(req),
-                        Method::POST => handle::admin::users::handle_post(state, req).await,
+                        Method::POST => handle::users::handle_post(state, req).await,
                         Method::DELETE => okay_response(req),
                         _ => Err(method_not_allowed())
                     }
                 }
 
-                let mut params = params::Params::with([
+                let params = params::Params::with([
                     ("users_id".into(), segments_iter.next().unwrap().into())
                 ]);
-                
+
                 if total_segments == 2 {
                     req.extensions_mut().insert(params);
 
@@ -88,33 +103,20 @@ impl Router {
                         Method::DELETE => okay_response(req),
                         _ => Err(method_not_allowed())
                     }
-                } else if let Some(third_seg) = segments_iter.next() {
-                    params.insert("context", join_iter(&mut segments_iter));
-
-                    req.extensions_mut().insert(params);
-
-                    if third_seg == "fs" {
-                        return match method {
-                            Method::GET => handle::fs::handle_get(state, req).await,
-                            Method::POST => handle::fs::handle_post(state, req).await,
-                            Method::PUT => handle::fs::handle_put(state, req).await,
-                            Method::DELETE => handle::fs::handle_delete(state, req).await,
-                            _ => Err(method_not_allowed())
-                        }
-                    } else if third_seg == "sync" {
-                        return match method {
-                            Method::PUT => handle::sync::handle_put(state, req).await,
-                            _ => Err(method_not_allowed())
-                        }
-                    }
                 }
             } else if first_seg == "listeners" {
-                return match method {
-                    Method::GET => handle::listeners::handle_get(state, req).await,
-                    Method::POST => handle::listeners::handle_post(state, req).await,
-                    Method::DELETE => handle::listeners::handle_delete(state, req).await,
-                    _ => Err(method_not_allowed())
+                if total_segments == 1 {
+                    return match method {
+                        Method::GET => handle::listeners::handle_get(state, req).await,
+                        Method::POST => handle::listeners::handle_post(state, req).await,
+                        Method::DELETE => handle::listeners::handle_delete(state, req).await,
+                        _ => Err(method_not_allowed())
+                    }
                 }
+
+                req.extensions_mut().insert(params::Params::with([
+                    ("listener_id".into(), segments_iter.next().unwrap().into())
+                ]));
             } else if first_seg == "session" {
                 if total_segments == 1 {
                     return match method {

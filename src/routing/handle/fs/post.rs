@@ -3,7 +3,7 @@ use serde_json::json;
 use tokio::fs::create_dir;
 
 use crate::components::auth::require_session;
-use crate::components::fs_items::new_resource;
+use crate::components::fs_items::{new_resource, SearchOptions};
 use crate::db::record::{FsItem, FsItemType};
 use crate::event;
 use crate::http::body::file_from_body;
@@ -11,23 +11,27 @@ use crate::http::response::JsonResponseBuilder;
 use crate::http::uri::QueryMap;
 use crate::http::{Response, Request};
 use crate::http::error::{Error, Result};
+use crate::routing::Params;
 use crate::state::AppState;
 
 pub async fn handle_post(state: AppState, req: Request) -> Result<Response> {
-    let (head, body) = req.into_parts();
+    let (mut head, body) = req.into_parts();
+    let params = head.extensions.remove::<Params>().unwrap();
     let mut conn = state.db.pool.get().await?;
+
     let (user, _) = require_session(&*conn, &head.headers).await?;
+    let query_map = QueryMap::new(&head.uri);
+    let context = params.get_value_ref("context").unwrap();
+    let mut search_options = SearchOptions::new(user.id);
+    search_options.pull_from_query_map(&query_map)?;
 
-    let context = String::new();
-
-    let (parent, basename) = new_resource(&*conn, &user, &context).await?;
+    let (parent, basename) = new_resource(&*conn, context, search_options).await?;
 
     if let Some(fs_parent) = parent {
         if fs_parent.users_id != user.id {
             // check permissions
         }
 
-        let query_map = QueryMap::new(&head.uri);
         let post_type = if let Some(key_value) = query_map.get_value("type") {
             if let Some(existing) = key_value {
                 existing
@@ -37,6 +41,7 @@ pub async fn handle_post(state: AppState, req: Request) -> Result<Response> {
         } else {
             "file".to_owned()
         };
+
         let override_existing = if let Some(key_value) = query_map.get_value_ref("override") {
             if let Some(existing) = key_value {
                 existing == "1"
@@ -46,6 +51,7 @@ pub async fn handle_post(state: AppState, req: Request) -> Result<Response> {
         } else {
             false
         };
+
         let post_path = {
             let mut rtn = state.storage.directory.clone();
 

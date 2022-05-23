@@ -20,9 +20,7 @@ impl<S> Layer<S> for LogLayer {
     type Service = LogService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        LogService {
-            inner 
-        }
+        LogService { inner }
     }
 }
 

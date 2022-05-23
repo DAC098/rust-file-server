@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::Hash, borrow::Borrow};
 
 use hyper::Uri;
 
@@ -40,18 +40,20 @@ impl QueryMap {
         QueryMap(map)
     }
 
-    pub fn has_key<K>(&self, key: K) -> bool
+    pub fn has_key<K>(&self, key: &K) -> bool
     where
-        K: Into<String>
+        K: ?Sized + Hash + Eq,
+        String: Borrow<K>
     {
-        self.0.contains_key(&key.into())
+        self.0.contains_key(key)
     }
 
-    pub fn get_value<K>(&self, key: K) -> Option<Option<String>>
+    pub fn get_value<K>(&self, key: &K) -> Option<Option<String>>
     where
-        K: Into<String>
+        K: ?Sized + Hash + Eq,
+        String: Borrow<K>
     {
-        if let Some(list) = self.0.get(&key.into()) {
+        if let Some(list) = self.0.get(key) {
             Some(list.first()
                 .unwrap()
                 .as_ref()
@@ -61,11 +63,12 @@ impl QueryMap {
         }
     }
 
-    pub fn get_value_ref<K>(&self, key: K) -> Option<&Option<String>>
+    pub fn get_value_ref<K>(&self, key: &K) -> Option<&Option<String>>
     where
-        K: Into<String>
+        K: ?Sized + Hash + Eq,
+        String: Borrow<K>
     {
-        if let Some(list) = self.0.get(&key.into()) {
+        if let Some(list) = self.0.get(key) {
             list.first()
         } else {
             None

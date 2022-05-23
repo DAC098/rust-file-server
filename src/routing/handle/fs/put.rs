@@ -3,7 +3,7 @@ use serde_json::Value as JsonValue;
 use hyper::Body;
 
 use crate::components::auth::require_session;
-use crate::components::fs_items::existing_resource;
+use crate::components::fs_items::{existing_resource, SearchOptions};
 use crate::db::record::{FsItem, FsItemType};
 use crate::db::types::PoolConn;
 use crate::event;
@@ -12,6 +12,7 @@ use crate::http::response::JsonResponseBuilder;
 use crate::http::{Response, Request};
 use crate::http::error::{Error, Result};
 use crate::http::uri;
+use crate::routing::Params;
 use crate::state::AppState;
 
 async fn handle_put_upload_action(state: &AppState, conn: PoolConn<'_>, mut fs_item: FsItem, body: Body) -> Result<Response> {
@@ -74,13 +75,17 @@ async fn handle_put_user_data_action(state: &AppState, conn: PoolConn<'_>, mut f
 }
 
 pub async fn handle_put(state: AppState, req: Request) -> Result<Response> {
-    let (head, body) = req.into_parts();
+    let (mut head, body) = req.into_parts();
+    let params = head.extensions.remove::<Params>().unwrap();
     let conn = state.db.pool.get().await?;
+
     let (user, _) = require_session(&*conn, &head.headers).await?;
+    let query_map = uri::QueryMap::new(&head.uri);
+    let context = params.get_value_ref("context").unwrap();
+    let mut search_options = SearchOptions::new(user.id);
+    search_options.pull_from_query_map(&query_map)?;
 
-    let context = String::new();
-
-    if let Some(fs_item) = existing_resource(&*conn, &user, &context).await? {
+    if let Some(fs_item) = existing_resource(&*conn, context, search_options).await? {
         if fs_item.users_id != user.id {
             // permissions check
         }

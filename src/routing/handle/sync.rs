@@ -11,14 +11,15 @@ use crate::{
         Request, 
         Response, 
         error::{Result, Error}, 
-        response::JsonResponseBuilder
+        response::JsonResponseBuilder, 
+        uri
     }, 
     components::{
         auth::require_session, 
-        fs_items::existing_resource
+        fs_items::{existing_resource, SearchOptions}
     }, 
     db::record::{FsItem, FsItemType}, 
-    event
+    event, routing::Params
 };
 
 struct WorkItem {
@@ -26,13 +27,17 @@ struct WorkItem {
     id: i64
 }
 
-pub async fn handle_put(state: AppState, req: Request) -> Result<Response> {
+pub async fn handle_put(state: AppState, mut req: Request) -> Result<Response> {
     let mut conn = state.db.pool.get().await?;
+    let params = req.extensions_mut().remove::<Params>().unwrap();
+
     let (user, _) = require_session(&*conn, req.headers()).await?;
+    let query_map = uri::QueryMap::new(req.uri());
+    let context = params.get_value_ref("context").unwrap();
+    let mut search_options = SearchOptions::new(user.id);
+    search_options.pull_from_query_map(&query_map)?;
 
-    let context = String::new();
-
-    if let Some(fs_item) = existing_resource(&*conn, &user, &context).await? {
+    if let Some(fs_item) = existing_resource(&*conn, context, search_options).await? {
         let mut created_items: u64 = 0;
         let mut updated_items: u64 = 0;
         let mut missing_items: u64 = 0;

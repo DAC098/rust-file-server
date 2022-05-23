@@ -18,6 +18,8 @@ use crate::{
     state::AppState
 };
 
+pub mod users_id;
+
 #[derive(Deserialize)]
 struct NewUserJson {
     username: String,

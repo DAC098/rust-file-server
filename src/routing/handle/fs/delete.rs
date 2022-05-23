@@ -5,20 +5,26 @@ use futures::{pin_mut, TryStreamExt};
 use tokio::fs::{remove_file, remove_dir};
 
 use crate::components::auth::require_session;
-use crate::components::fs_items::existing_resource;
+use crate::components::fs_items::{existing_resource, SearchOptions};
 use crate::db::record::FsItemType;
 use crate::event;
 use crate::http::response::JsonResponseBuilder;
-use crate::http::{Response, Request};
+use crate::http::{Response, Request, uri};
 use crate::http::error::{Error, Result};
+use crate::routing::Params;
 use crate::state::AppState;
 
-pub async fn handle_delete(state: AppState, req: Request) -> Result<Response> {
+pub async fn handle_delete(state: AppState, mut req: Request) -> Result<Response> {
+    let params = req.extensions_mut().remove::<Params>().unwrap();
     let mut conn = state.db.pool.get().await?;
-    let (user, _) = require_session(&*conn, req.headers()).await?;
-    let context = String::new();
 
-    if let Some(fs_item) = existing_resource(&*conn, &user, &context).await? {
+    let (user, _) = require_session(&*conn, req.headers()).await?;
+    let query_map = uri::QueryMap::new(req.uri());
+    let context = params.get_value_ref("context").unwrap();
+    let mut search_options = SearchOptions::new(user.id);
+    search_options.pull_from_query_map(&query_map)?;
+
+    if let Some(fs_item) = existing_resource(&*conn, context, search_options).await? {
         if fs_item.is_root {
             return Err(Error::new(400, "CannotDeleteRoot", "you cannot delete your root directory"));
         }
